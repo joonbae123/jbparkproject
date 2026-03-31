@@ -909,15 +909,24 @@ function getHTML(): string {
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
-          const lines = buffer.split('\\n');
-          buffer = lines.pop() || '';
+          // SSE는 빈 줄로 이벤트 블록을 구분함
+          const blocks = buffer.split('\\n\\n');
+          buffer = blocks.pop() || '';
 
-          for (const line of lines) {
-            if (!line.startsWith('data:')) continue;
+          for (const block of blocks) {
+            if (!block.trim()) continue;
             try {
-              const data = JSON.parse(line.slice(5).trim());
-              const eventLine = lines[lines.indexOf(line) - 1] || '';
-              const eventType = eventLine.startsWith('event:') ? eventLine.slice(6).trim() : '';
+              const blockLines = block.split('\\n');
+              let eventType = '';
+              let dataStr = '';
+
+              for (const bline of blockLines) {
+                if (bline.startsWith('event:')) eventType = bline.slice(6).trim();
+                if (bline.startsWith('data:')) dataStr = bline.slice(5).trim();
+              }
+
+              if (!dataStr) continue;
+              const data = JSON.parse(dataStr);
 
               if (eventType === 'dev_start') {
                 document.getElementById('dev-session-id').textContent = data.sessionId;

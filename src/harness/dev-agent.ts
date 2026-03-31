@@ -79,19 +79,27 @@ const DEV_AGENT_CONFIGS: Record<DevAgentRole, {
 
 역할:
 1. PM 명세서를 보고 실제로 동작하는 코드를 작성합니다
-2. write_code 도구로 파일을 저장합니다
+2. write_code 도구로 "solution.js" 파일 하나에 모든 코드를 작성합니다
 3. execute_code 도구로 즉시 실행하여 동작을 확인합니다
-4. 에러가 발생하면 원인을 분석하고 코드를 수정합니다 (최대 3회 시도)
+4. 에러가 발생하면 에러 메시지를 정확히 읽고, 코드 전체를 다시 작성합니다
 
-중요 규칙:
-- 코드는 순수 JavaScript (.js 파일)로 작성하세요 (TypeScript 불가)
-- 외부 라이브러리 설치 없이 Node.js 내장 모듈만 사용하세요
-- 코드 마지막에 간단한 실행 예시를 포함하세요 (console.log로 결과 출력)
-- execute_code로 실행해서 실제 출력을 확인하세요
+절대 규칙 (반드시 지킬 것):
+- 파일명은 항상 "solution.js" 하나만 사용 (여러 파일 금지)
+- 순수 JavaScript만 사용 (TypeScript, require 외부 패키지 금지)
+- Node.js 내장 모듈만 허용: assert, fs, path, crypto 등
+- 코드 마지막 줄에 반드시 console.log로 실행 결과를 출력하세요
+- 에러 발생 시: 에러 메시지의 줄 번호를 확인하고 그 부분만 정확히 수정
+- 같은 코드를 반복하지 마세요. 에러가 났으면 반드시 다른 방식으로 작성
+
+코드 작성 패턴 (이 순서를 지키세요):
+① 함수 정의 (단순하고 명확하게)
+② 엣지케이스 처리 (null, undefined, 빈 배열 등)
+③ console.log로 테스트 결과 출력
+④ write_code로 저장 → execute_code로 실행 확인
 
 반드시 한국어로 응답하세요.`,
-    allowedTools: ["write_code", "read_code", "execute_code", "list_files"],
-    maxIterations: 8  // 에러 수정 반복 허용
+    allowedTools: ["write_code", "execute_code", "list_files"],
+    maxIterations: 6  // 최대 6회 (write+execute 세트 3번)
   },
 
   reviewer: {
@@ -253,8 +261,8 @@ export async function runDevAgent(
         model: "gpt-4o-mini",
         messages,
         ...(openAITools.length > 0 ? { tools: openAITools, tool_choice: "auto" } : {}),
-        max_tokens: 3000,
-        temperature: role === "developer" ? 0.3 : 0.5  // 개발자는 일관성 중시
+        max_tokens: role === "developer" ? 4000 : 2000,
+        temperature: role === "developer" ? 0.2 : 0.5
       });
 
       const choice = response.choices[0];
@@ -297,10 +305,16 @@ export async function runDevAgent(
             result: toolResult.content
           });
 
+          // 컨텍스트 폭발 방지: execute_code 실패 결과는 500자로 자르기
+          let toolContent = toolResult.content;
+          if ((toolName === "execute_code" || toolName === "run_tests") && !toolResult.success) {
+            toolContent = toolContent.slice(0, 500) + (toolContent.length > 500 ? "\n...(에러 메시지 생략)" : "");
+          }
+
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
-            content: toolResult.content
+            content: toolContent
           });
         }
         continue;

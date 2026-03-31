@@ -149,12 +149,52 @@ export async function decideDevNextStep(
   stepCount: number
 ): Promise<DevNextStep> {
 
-  // 안전장치: 최대 10스텝
+  // ── 안전장치 1: 최대 10스텝 ──
   if (stepCount >= 10) {
     return {
       nextRole: "done",
       instruction: "개발 완료",
       reasoning: "최대 스텝(10) 도달 - 강제 종료",
+      priority: "normal"
+    };
+  }
+
+  // ── 안전장치 2: Developer 연속 실패 3회 이상 시 강제 done ──
+  const recentDevFails = completedSteps
+    .filter(s => s.role === "developer" && s.executionSuccess === false);
+  const consecutiveFails = (() => {
+    let count = 0;
+    for (let i = completedSteps.length - 1; i >= 0; i--) {
+      const s = completedSteps[i];
+      if (s.role === "developer" && s.executionSuccess === false) count++;
+      else break;
+    }
+    return count;
+  })();
+
+  if (consecutiveFails >= 3) {
+    console.warn(`[DevOrchestrator] Developer 연속 실패 ${consecutiveFails}회 - 강제 done 처리`);
+    return {
+      nextRole: "done",
+      instruction: `Developer가 ${consecutiveFails}회 연속 실패했습니다. 생성된 코드가 있으면 해당 코드가 최종 결과물입니다.`,
+      reasoning: `연속 ${consecutiveFails}회 실행 실패 - 추가 시도를 해도 해결되지 않을 가능성이 높아 강제 종료`,
+      priority: "normal"
+    };
+  }
+
+  // ── 안전장치 3: Developer가 성공한 코드가 있는데 또 Developer를 부르는 상황 저지 ──
+  const hasSuccessfulDev = completedSteps.some(
+    s => s.role === "developer" && s.executionSuccess === true
+  );
+  const hasReviewer = completedSteps.some(s => s.role === "reviewer");
+  const hasQA = completedSteps.some(s => s.role === "qa_tester");
+
+  // 성공한 코드 + 리뷰 + QA 모두 완료 시 강제 done
+  if (hasSuccessfulDev && hasReviewer && hasQA) {
+    return {
+      nextRole: "done",
+      instruction: "모든 단계 완료 - 개발 종료",
+      reasoning: "PM → 개발 → 리뷰 → QA 모든 단계 완료",
       priority: "normal"
     };
   }
@@ -170,10 +210,17 @@ export async function decideDevNextStep(
 - done: QA 통과 또는 충분히 완성된 경우
 
 중요 판단 기준:
-- 코드 실행에 실패했다면 → developer (수정 필요)
-- 리뷰어가 반려했다면 → developer (피드백 반영)
-- 테스트가 실패했다면 → developer (버그 수정)
-- QA가 통과했다면 → done
+- 코드 실행 성공 + 리뷰/QA 없음 → reviewer
+- 리뷰어 점수 70 이상 → qa_tester
+- QA 통과 → done
+- 코드 실행 실패 (1~2회) → developer (수정)
+- developer가 이미 2회 이상 실패 → done (더 이상 시도 무의미)
+- 리뷰어 점수 70 미만 → developer (피드백 반영, 1회만)
+
+절대 금지:
+- developer를 3회 이상 연속 호출하지 마세요
+- 이미 성공한 단계를 반복하지 마세요
+- 순환 루프(developer → developer → developer)는 금지
 
 현재 진행: ${stepCount + 1}번째 스텝
 
@@ -260,13 +307,26 @@ export function getDefaultDevNextStep(completedSteps: DevCompletedStep[]): DevNe
     return { nextRole: "pm", instruction: "요구사항을 분석하세요.", reasoning: "기본: PM 먼저", priority: "normal" };
   }
   if (!roles.includes("developer")) {
-    return { nextRole: "developer", instruction: "PM 명세서로 코드를 작성하세요.", reasoning: "기본: 개발 단계", priority: "normal" };
+    return { nextRole: "developer", instruction: "PM 명세서로 코드를 작성하세요. 파일명은 solution.js 하나만 사용하세요.", reasoning: "기본: 개발 단계", priority: "normal" };
   }
 
-  // 실행 실패한 개발자 작업이 있으면 재시도
+  // 연속 실패 횟수 계산
+  let consecutiveFails = 0;
+  for (let i = completedSteps.length - 1; i >= 0; i--) {
+    const s = completedSteps[i];
+    if (s.role === "developer" && s.executionSuccess === false) consecutiveFails++;
+    else break;
+  }
+
+  // 연속 실패 2회 이상이면 강제 done
+  if (consecutiveFails >= 2) {
+    return { nextRole: "done", instruction: "연속 실패로 강제 종료합니다.", reasoning: `기본: Developer 연속 ${consecutiveFails}회 실패`, priority: "normal" };
+  }
+
+  // 마지막 개발 결과가 실패면 1회 수정 허용
   const lastDev = [...completedSteps].reverse().find(s => s.role === "developer");
   if (lastDev && lastDev.executionSuccess === false) {
-    return { nextRole: "developer", instruction: "실행 오류를 수정하세요.", reasoning: "기본: 실행 실패 수정", priority: "fix" };
+    return { nextRole: "developer", instruction: "실행 오류를 확인하고 코드 전체를 다시 작성하세요. solution.js 하나의 파일에 모든 코드를 담으세요.", reasoning: "기본: 실행 실패 1회 수정", priority: "fix" };
   }
 
   if (!roles.includes("reviewer")) {
