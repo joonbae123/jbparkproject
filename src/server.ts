@@ -7,7 +7,7 @@ app.route("/api", api);
 app.get("/", (c) => c.html(getHTML()));
 
 const PORT = 3000;
-console.log(`\n🚀 AI Harness + MCP Demo Server v2`);
+console.log(`\n🚀 AI Harness + MCP Demo Server v3`);
 console.log(`📍 http://localhost:${PORT}`);
 console.log(`📡 API: http://localhost:${PORT}/api/health\n`);
 
@@ -19,7 +19,7 @@ function getHTML(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Harness + MCP Demo v2</title>
+  <title>AI Harness + MCP Demo v3</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <style>
@@ -31,6 +31,12 @@ function getHTML(): string {
     .rejected-shake { animation: shake 0.4s ease-out; }
     pre { white-space:pre-wrap; word-break:break-word; }
     .score-bar { transition: width 0.8s ease-out; }
+
+    /* 슬라이더 커스텀 스타일 */
+    input[type=range] { -webkit-appearance:none; appearance:none; height:6px; border-radius:3px; outline:none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:#3b82f6; cursor:pointer; border:2px solid #1d4ed8; }
+    input[type=range].unlimited::-webkit-slider-thumb { background:#a855f7; border-color:#7c3aed; }
+    input[type=range].target-slider::-webkit-slider-thumb { background:#10b981; border-color:#059669; }
   </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen">
@@ -42,9 +48,9 @@ function getHTML(): string {
         <h1 class="text-xl font-bold text-white flex items-center gap-2">
           <i class="fas fa-robot text-blue-400"></i>
           AI Harness + MCP Demo
-          <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full ml-1">v2 피드백 루프</span>
+          <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full ml-1">v3 커스텀 루프</span>
         </h1>
-        <p class="text-xs text-gray-400 mt-1">비평가 반려 → 리서처 재시도 · 최대 3회</p>
+        <p class="text-xs text-gray-400 mt-1">재시도 횟수 · 목표 점수를 직접 설정하세요</p>
       </div>
       <div id="status-badge" class="hidden items-center gap-2 bg-gray-800 px-3 py-1 rounded-full text-xs">
         <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
@@ -73,16 +79,12 @@ function getHTML(): string {
         <i class="fas fa-arrow-right text-gray-500"></i>
         <div class="bg-yellow-900/40 border border-yellow-600 rounded-lg px-3 py-2 text-center">
           <div class="text-yellow-300 font-medium">⚖️ Critic</div>
-          <div class="text-gray-500 text-xs">승인/반려 판정</div>
+          <div class="text-gray-500 text-xs">점수 ≥ 목표? 승인/반려</div>
         </div>
         <div class="flex flex-col items-center gap-1">
-          <div class="text-xs text-red-400 flex items-center gap-1">
-            <i class="fas fa-redo text-xs"></i> 반려 시 재시도
-          </div>
+          <div class="text-xs text-red-400 flex items-center gap-1"><i class="fas fa-redo text-xs"></i> 반려 → 재시도</div>
           <i class="fas fa-arrow-right text-gray-500"></i>
-          <div class="text-xs text-green-400 flex items-center gap-1">
-            <i class="fas fa-check text-xs"></i> 승인 시 진행
-          </div>
+          <div class="text-xs text-green-400 flex items-center gap-1"><i class="fas fa-check text-xs"></i> 승인 → 진행</div>
         </div>
         <div class="bg-green-900/40 border border-green-600 rounded-lg px-3 py-2 text-center">
           <div class="text-green-300 font-medium">✨ Synthesizer</div>
@@ -91,32 +93,88 @@ function getHTML(): string {
       </div>
     </div>
 
-    <!-- 입력 섹션 -->
-    <div class="bg-gray-900 rounded-xl p-5 border border-gray-700">
-      <h2 class="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
-        <i class="fas fa-key text-yellow-400"></i> 설정
+    <!-- 입력 + 설정 섹션 -->
+    <div class="bg-gray-900 rounded-xl p-5 border border-gray-700 space-y-4">
+      <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2">
+        <i class="fas fa-sliders-h text-blue-400"></i> 설정
       </h2>
-      <div class="space-y-3">
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">OpenAI API Key</label>
-          <input id="api-key" type="password" placeholder="sk-proj-... 또는 sk-..."
-            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"/>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">리서치 쿼리</label>
-          <div class="flex gap-2 flex-wrap mb-2">
-            <button onclick="setQuery('AI Harness와 MCP의 미래 전망')" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">AI Harness 미래</button>
-            <button onclick="setQuery('2024년 대규모 언어 모델 트렌드')" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">LLM 트렌드</button>
-            <button onclick="setQuery('멀티 에이전트 시스템의 기업 활용 사례')" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">기업 활용사례</button>
-          </div>
-          <textarea id="query" rows="2" placeholder="리서치할 주제를 입력하세요..."
-            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 resize-none">AI Harness와 MCP의 미래 전망</textarea>
-        </div>
-        <button id="run-btn" onclick="runHarness()"
-          class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
-          <i class="fas fa-play"></i> Harness 실행 (피드백 루프)
-        </button>
+
+      <!-- API Key -->
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">OpenAI API Key</label>
+        <input id="api-key" type="password" placeholder="sk-proj-... 또는 sk-..."
+          class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"/>
       </div>
+
+      <!-- 재시도 횟수 + 목표 점수 슬라이더 (2열) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- 옵션 A: 최대 재시도 횟수 -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold text-blue-300 flex items-center gap-1">
+              <i class="fas fa-redo text-blue-400"></i> 옵션 A: 최대 재시도 횟수
+            </div>
+            <div id="retry-display" class="text-lg font-bold text-blue-400">3회</div>
+          </div>
+          <input id="max-retry" type="range" min="0" max="10" value="3" step="1"
+            oninput="updateRetryDisplay(this.value)"
+            class="w-full bg-gray-700"
+            style="accent-color:#3b82f6"/>
+          <div class="flex justify-between text-xs text-gray-500 mt-1">
+            <span class="text-purple-400 font-medium">0 = 무제한</span>
+            <span>1</span><span>3</span><span>5</span><span>7</span><span>10</span>
+          </div>
+          <div id="retry-desc" class="text-xs text-gray-400 mt-2 min-h-[2.5rem] leading-relaxed">
+            반려되어도 최대 3번까지 재시도합니다. 3번 모두 반려되면 강제 종료.
+          </div>
+        </div>
+
+        <!-- 옵션 B: 목표 점수 -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold text-green-300 flex items-center gap-1">
+              <i class="fas fa-bullseye text-green-400"></i> 옵션 B: 합격 기준 점수
+            </div>
+            <div id="score-display" class="text-lg font-bold text-green-400">80점</div>
+          </div>
+          <input id="target-score" type="range" min="0" max="100" value="80" step="5"
+            oninput="updateScoreDisplay(this.value)"
+            class="w-full bg-gray-700 target-slider"
+            style="accent-color:#10b981"/>
+          <div class="flex justify-between text-xs text-gray-500 mt-1">
+            <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+          </div>
+          <div id="score-desc" class="text-xs text-gray-400 mt-2 min-h-[2.5rem] leading-relaxed">
+            Critic 평가 점수가 80점 이상이면 자동 승인. 80점 미만은 반려.
+          </div>
+        </div>
+      </div>
+
+      <!-- 쿼리 입력 -->
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">리서치 쿼리</label>
+        <div class="flex gap-2 flex-wrap mb-2">
+          <button onclick="setQuery('AI Harness와 MCP의 미래 전망')" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600">AI Harness 미래</button>
+          <button onclick="setQuery('2024년 대규모 언어 모델 트렌드')" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600">LLM 트렌드</button>
+          <button onclick="setQuery('멀티 에이전트 시스템의 기업 활용 사례')" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-600">기업 활용사례</button>
+        </div>
+        <textarea id="query" rows="2" placeholder="리서치할 주제를 입력하세요..."
+          class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 resize-none">AI Harness와 MCP의 미래 전망</textarea>
+      </div>
+
+      <!-- 실행 요약 배너 -->
+      <div id="run-summary" class="bg-gray-800 rounded-lg px-4 py-2.5 border border-gray-600 flex items-center gap-3 flex-wrap text-xs text-gray-300">
+        <i class="fas fa-info-circle text-blue-400"></i>
+        <span>최대 <strong id="sum-retry" class="text-blue-300">3회</strong> 재시도 ·
+        합격 기준 <strong id="sum-score" class="text-green-300">80점</strong> 이상 ·
+        <span id="sum-mode" class="text-yellow-300">3번 반려 시 강제 종료</span></span>
+      </div>
+
+      <button id="run-btn" onclick="runHarness()"
+        class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
+        <i class="fas fa-play"></i> Harness 실행
+      </button>
     </div>
 
     <!-- 파이프라인 실행 뷰 -->
@@ -140,12 +198,15 @@ function getHTML(): string {
       </h2>
       <div class="bg-gray-900 border border-yellow-800 rounded-xl p-5 space-y-4">
 
-        <!-- 요약 통계 -->
-        <div id="retry-stats" class="grid grid-cols-3 gap-3"></div>
+        <!-- 요약 통계 4칸 -->
+        <div id="retry-stats" class="grid grid-cols-4 gap-3"></div>
 
         <!-- 품질 점수 추이 -->
         <div id="quality-chart" class="hidden">
-          <div class="text-xs text-gray-400 mb-2 font-medium">품질 점수 추이</div>
+          <div class="text-xs text-gray-400 mb-2 font-medium flex items-center gap-2">
+            <i class="fas fa-chart-bar text-blue-400"></i> 시도별 품질 점수 추이
+            <span id="target-score-line" class="text-green-400 ml-auto"></span>
+          </div>
           <div id="quality-bars" class="space-y-2"></div>
         </div>
 
@@ -187,7 +248,7 @@ function getHTML(): string {
       </div>
     </div>
 
-  </div>
+  </div><!-- /max-w -->
 
   <script>
     let isRunning = false;
@@ -196,17 +257,82 @@ function getHTML(): string {
 
     function setQuery(t) { document.getElementById('query').value = t; }
 
+    // ───────────────── 슬라이더 업데이트 ─────────────────
+    function updateRetryDisplay(val) {
+      const n = parseInt(val);
+      const display = document.getElementById('retry-display');
+      const desc    = document.getElementById('retry-desc');
+      const btn     = document.getElementById('max-retry');
+
+      if (n === 0) {
+        display.textContent = '∞ 무제한';
+        display.className = 'text-lg font-bold text-purple-400';
+        btn.classList.add('unlimited');
+        desc.textContent = '점수 목표를 달성할 때까지 계속 재시도합니다. 안전장치: 최대 10회.';
+      } else {
+        display.textContent = n + '회';
+        display.className = 'text-lg font-bold text-blue-400';
+        btn.classList.remove('unlimited');
+        if (n === 1)      desc.textContent = '딱 1번만 시도합니다. 반려되면 바로 강제 종료.';
+        else if (n <= 3)  desc.textContent = \`반려되어도 최대 \${n}번까지 재시도합니다. \${n}번 모두 반려되면 강제 종료.\`;
+        else              desc.textContent = \`최대 \${n}번까지 재시도합니다. 많을수록 더 좋은 결과를 기대할 수 있지만 API 비용이 늘어납니다.\`;
+      }
+      updateSummary();
+    }
+
+    function updateScoreDisplay(val) {
+      const n = parseInt(val);
+      const display = document.getElementById('score-display');
+      const desc    = document.getElementById('score-desc');
+
+      let color = n >= 80 ? 'text-green-400' : n >= 60 ? 'text-yellow-400' : n >= 40 ? 'text-orange-400' : 'text-red-400';
+      display.textContent = n + '점';
+      display.className = 'text-lg font-bold ' + color;
+
+      if (n === 0)       desc.textContent = '점수 0점 이상이면 무조건 승인. 사실상 항상 1차 통과.';
+      else if (n <= 30)  desc.textContent = \`기준이 매우 낮습니다 (\${n}점). 대부분 1차에 통과될 거예요.\`;
+      else if (n <= 60)  desc.textContent = \`기준이 낮습니다 (\${n}점). 보통 1~2차에 통과됩니다.\`;
+      else if (n <= 79)  desc.textContent = \`적당한 기준 (\${n}점). 2~3차 시도가 필요할 수 있습니다.\`;
+      else if (n <= 89)  desc.textContent = \`엄격한 기준 (\${n}점). 여러 번 재시도가 필요할 수 있습니다.\`;
+      else if (n <= 95)  desc.textContent = \`매우 엄격한 기준 (\${n}점). 재시도 횟수를 넉넉히 설정하세요.\`;
+      else               desc.textContent = \`극도로 엄격한 기준 (\${n}점). 거의 통과가 어려울 수 있습니다.\`;
+      updateSummary();
+    }
+
+    function updateSummary() {
+      const maxRetry     = parseInt(document.getElementById('max-retry').value);
+      const targetScore  = parseInt(document.getElementById('target-score').value);
+
+      document.getElementById('sum-retry').textContent  = maxRetry === 0 ? '무제한' : maxRetry + '회';
+      document.getElementById('sum-score').textContent  = targetScore + '점';
+
+      const modeEl = document.getElementById('sum-mode');
+      if (maxRetry === 0) {
+        modeEl.textContent = '목표 점수 달성까지 계속 재시도 (안전장치: 10회)';
+        modeEl.className = 'text-purple-300';
+      } else {
+        modeEl.textContent = maxRetry + '번 반려 시 강제 종료';
+        modeEl.className = 'text-yellow-300';
+      }
+    }
+
+    // 페이지 로드 시 초기화
+    updateRetryDisplay(3);
+    updateScoreDisplay(80);
+
+    // ───────────────── 타이머 ─────────────────
     function updateTimer() {
       if (!startTime) return;
       const e = ((Date.now() - startTime) / 1000).toFixed(1);
       document.getElementById('timer').textContent = e + 's 경과';
     }
 
+    // ───────────────── 에이전트 카드 렌더링 ─────────────────
     function renderAgentCard(log) {
       const container = document.getElementById('agents-container');
-      const existing = document.getElementById('card-' + log.agentId);
+      const existing  = document.getElementById('card-' + log.agentId);
 
-      const attemptBadge = log.attempt > 1
+      const attemptBadge = (log.attempt > 1)
         ? \`<span class="text-xs bg-orange-900 text-orange-300 px-1.5 py-0.5 rounded ml-1">\${log.attempt}차 시도</span>\`
         : '';
 
@@ -219,7 +345,6 @@ function getHTML(): string {
           : 'border-green-700',
         error: 'border-red-700'
       };
-
       const statusIcons = {
         idle: '<i class="fas fa-circle text-gray-600"></i>',
         running: '<i class="fas fa-spinner fa-spin text-blue-400"></i>',
@@ -229,7 +354,6 @@ function getHTML(): string {
           : '<i class="fas fa-check-circle text-green-400"></i>',
         error: '<i class="fas fa-times-circle text-red-400"></i>'
       };
-
       const roleColors = {
         researcher: 'text-blue-300',
         analyst: 'text-purple-300',
@@ -268,7 +392,9 @@ function getHTML(): string {
         </details>
       \` : '';
 
-      const durationHTML = log.duration ? \`<span class="text-xs text-gray-600 ml-auto">\${(log.duration/1000).toFixed(1)}s</span>\` : '';
+      const durationHTML = log.duration
+        ? \`<span class="text-xs text-gray-600 ml-auto">\${(log.duration/1000).toFixed(1)}s</span>\`
+        : '';
 
       const html = \`
         <div id="card-\${log.agentId}"
@@ -286,24 +412,17 @@ function getHTML(): string {
         </div>
       \`;
 
-      if (existing) {
-        existing.outerHTML = html;
-      } else {
-        container.insertAdjacentHTML('beforeend', html);
-      }
+      if (existing) { existing.outerHTML = html; }
+      else          { container.insertAdjacentHTML('beforeend', html); }
     }
 
+    // ───────────────── 반려 이벤트 카드 ─────────────────
     function renderRetryEvent(event) {
-      const section = document.getElementById('retry-report-section');
+      document.getElementById('retry-report-section').classList.remove('hidden');
       const eventsContainer = document.getElementById('retry-events');
-      section.classList.remove('hidden');
 
-      const issuesHTML = event.judgement.issues.map(i =>
-        \`<li class="text-red-300">\${i}</li>\`
-      ).join('');
-      const suggestionsHTML = event.judgement.suggestions.map(s =>
-        \`<li class="text-blue-300">\${s}</li>\`
-      ).join('');
+      const issuesHTML      = event.judgement.issues.map(i => \`<li class="text-red-300">\${i}</li>\`).join('');
+      const suggestionsHTML = event.judgement.suggestions.map(s => \`<li class="text-blue-300">\${s}</li>\`).join('');
 
       eventsContainer.insertAdjacentHTML('beforeend', \`
         <div class="fade-in bg-red-950/30 border border-red-800 rounded-lg p-4">
@@ -331,18 +450,14 @@ function getHTML(): string {
       \`);
     }
 
-    function showGlobalError(msg) {
-      const el = document.getElementById('global-error');
-      document.getElementById('global-error-msg').textContent = msg;
-      el.classList.remove('hidden');
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
+    // ───────────────── 최종 리포트 렌더링 ─────────────────
+    function renderRetryReport(retryReport, targetScore) {
+      document.getElementById('retry-report-section').classList.remove('hidden');
 
-    function renderRetryReport(retryReport) {
-      const section = document.getElementById('retry-report-section');
-      section.classList.remove('hidden');
+      // 강제 종료 여부 판별
+      const forcedStop = retryReport.finalVerdict === 'rejected';
 
-      // 요약 통계
+      // 4칸 통계
       const statsColor = retryReport.totalRejections === 0 ? 'border-green-700' : 'border-yellow-700';
       document.getElementById('retry-stats').innerHTML = \`
         <div class="bg-gray-800 rounded-lg p-3 text-center border \${statsColor}">
@@ -353,33 +468,46 @@ function getHTML(): string {
           <div class="text-2xl font-bold \${retryReport.totalRejections > 0 ? 'text-red-400' : 'text-green-400'}">\${retryReport.totalRejections}</div>
           <div class="text-xs text-gray-400 mt-1">반려 횟수</div>
         </div>
-        <div class="bg-gray-800 rounded-lg p-3 text-center border \${retryReport.finalVerdict === 'approved' ? 'border-green-700' : 'border-yellow-700'}">
-          <div class="text-2xl font-bold \${retryReport.finalVerdict === 'approved' ? 'text-green-400' : 'text-yellow-400'}">
-            \${retryReport.finalVerdict === 'approved' ? '✅' : '⚠️'}
+        <div class="bg-gray-800 rounded-lg p-3 text-center border border-blue-700">
+          <div class="text-2xl font-bold text-blue-400">\${targetScore}점</div>
+          <div class="text-xs text-gray-400 mt-1">합격 기준</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-3 text-center border \${forcedStop ? 'border-orange-700' : 'border-green-700'}">
+          <div class="text-2xl font-bold \${forcedStop ? 'text-orange-400' : 'text-green-400'}">
+            \${forcedStop ? '⚠️' : '✅'}
           </div>
-          <div class="text-xs text-gray-400 mt-1">최종 판정</div>
+          <div class="text-xs text-gray-400 mt-1">\${forcedStop ? '강제 종료' : '정상 승인'}</div>
         </div>
       \`;
 
-      // 품질 점수 추이
+      // 품질 점수 추이 바 차트
       if (retryReport.qualityProgression.length > 0) {
-        const chartSection = document.getElementById('quality-chart');
-        chartSection.classList.remove('hidden');
-        const maxScore = 100;
+        document.getElementById('quality-chart').classList.remove('hidden');
+        document.getElementById('target-score-line').textContent = '● 합격 기준: ' + targetScore + '점';
+
         document.getElementById('quality-bars').innerHTML = retryReport.qualityProgression.map((score, i) => {
-          const color = score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-yellow-500' : 'bg-red-500';
-          const label = i < retryReport.qualityProgression.length - 1
-            ? \`\${i+1}차 시도 (반려)\`
-            : \`\${i+1}차 시도 (최종)\`;
+          const isLast  = i === retryReport.qualityProgression.length - 1;
+          const passed  = score >= targetScore;
+          const color   = passed ? 'bg-green-500' : score >= targetScore * 0.8 ? 'bg-yellow-500' : 'bg-red-500';
+          const label   = isLast
+            ? (forcedStop ? \`\${i+1}차 (강제종료)\` : \`\${i+1}차 (승인)\`)
+            : \`\${i+1}차 (반려)\`;
+          const badge   = passed
+            ? '<span class="text-xs text-green-300 ml-2">✅ 통과</span>'
+            : \`<span class="text-xs text-red-300 ml-2">❌ -\${targetScore - score}점 부족</span>\`;
           return \`
             <div class="flex items-center gap-3">
               <div class="text-xs text-gray-400 w-24 shrink-0">\${label}</div>
-              <div class="flex-1 bg-gray-800 rounded-full h-4 overflow-hidden">
-                <div class="\${color} h-4 rounded-full score-bar flex items-center justify-end pr-2"
+              <div class="flex-1 relative bg-gray-800 rounded-full h-5 overflow-hidden">
+                <div class="\${color} h-5 rounded-full score-bar flex items-center justify-end pr-2"
                   style="width:\${score}%">
                   <span class="text-xs text-white font-bold">\${score}점</span>
                 </div>
+                <!-- 목표 기준선 -->
+                <div class="absolute top-0 bottom-0 border-l-2 border-white/50 border-dashed"
+                  style="left:\${targetScore}%"></div>
               </div>
+              \${badge}
             </div>
           \`;
         }).join('');
@@ -392,14 +520,24 @@ function getHTML(): string {
       }
     }
 
+    // ───────────────── 전역 에러 ─────────────────
+    function showGlobalError(msg) {
+      const el = document.getElementById('global-error');
+      document.getElementById('global-error-msg').textContent = msg;
+      el.classList.remove('hidden');
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // ───────────────── 메인 실행 ─────────────────
     async function runHarness() {
       if (isRunning) return;
-      const apiKey = document.getElementById('api-key').value.trim();
-      const query = document.getElementById('query').value.trim();
-      const projectId = '';
+      const apiKey      = document.getElementById('api-key').value.trim();
+      const query       = document.getElementById('query').value.trim();
+      const maxRetry    = parseInt(document.getElementById('max-retry').value);
+      const targetScore = parseInt(document.getElementById('target-score').value);
 
-      if (!apiKey) { alert('OpenAI API Key를 입력하세요'); return; }
-      if (!query) { alert('리서치 쿼리를 입력하세요'); return; }
+      if (!apiKey)  { alert('OpenAI API Key를 입력하세요'); return; }
+      if (!query)   { alert('리서치 쿼리를 입력하세요'); return; }
 
       isRunning = true;
       startTime = Date.now();
@@ -411,63 +549,56 @@ function getHTML(): string {
       document.getElementById('report-section').classList.add('hidden');
       document.getElementById('retry-report-section').classList.add('hidden');
       document.getElementById('global-error').classList.add('hidden');
-      document.getElementById('agents-container').innerHTML = '';
-      document.getElementById('retry-events').innerHTML = '';
-      document.getElementById('retry-stats').innerHTML = '';
-      document.getElementById('quality-bars').innerHTML = '';
+      document.getElementById('agents-container').innerHTML  = '';
+      document.getElementById('retry-events').innerHTML      = '';
+      document.getElementById('retry-stats').innerHTML       = '';
+      document.getElementById('quality-bars').innerHTML      = '';
       document.getElementById('status-badge').classList.remove('hidden');
       document.getElementById('status-badge').classList.add('flex');
       document.getElementById('status-text').textContent = '에이전트 실행 중...';
       document.getElementById('attempt-counter').textContent = '1차 시도';
-
       timerInterval = setInterval(updateTimer, 100);
 
       try {
         const response = await fetch('/api/harness', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, apiKey, projectId })
+          body: JSON.stringify({ query, apiKey, maxRetry, targetScore })
         });
 
-        const reader = response.body.getReader();
+        const reader  = response.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
-        let lastEvent = '';
+        let buffer = '', lastEvent = '';
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\\n');
           buffer = lines.pop() || '';
 
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.startsWith('event: ')) {
-              lastEvent = line.slice(7).trim();
-            } else if (line.startsWith('data: ') && lastEvent) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                handleSSEEvent(lastEvent, data);
-              } catch(e) {}
+          for (const line of lines) {
+            if (line.startsWith('event: '))       { lastEvent = line.slice(7).trim(); }
+            else if (line.startsWith('data: ') && lastEvent) {
+              try { handleSSEEvent(lastEvent, JSON.parse(line.slice(6)), targetScore); } catch(e) {}
               lastEvent = '';
             }
           }
         }
       } catch (err) {
-        alert('오류: ' + err.message);
+        showGlobalError('네트워크 오류: ' + err.message);
       } finally {
         clearInterval(timerInterval);
         isRunning = false;
         document.getElementById('run-btn').disabled = false;
-        document.getElementById('run-btn').innerHTML = '<i class="fas fa-play"></i> Harness 실행 (피드백 루프)';
+        document.getElementById('run-btn').innerHTML = '<i class="fas fa-play"></i> Harness 실행';
         document.getElementById('status-badge').classList.add('hidden');
         document.getElementById('status-badge').classList.remove('flex');
       }
     }
 
-    function handleSSEEvent(event, data) {
+    // ───────────────── SSE 이벤트 핸들러 ─────────────────
+    function handleSSEEvent(event, data, targetScore) {
       switch(event) {
         case 'start':
           document.getElementById('status-text').textContent = 'Harness 시작됨';
@@ -475,8 +606,7 @@ function getHTML(): string {
 
         case 'retry_event':
           renderRetryEvent(data);
-          const nextAttempt = data.attempt + 1;
-          document.getElementById('attempt-counter').textContent = nextAttempt + '차 시도 (재시도)';
+          document.getElementById('attempt-counter').textContent = (data.attempt + 1) + '차 시도 (재시도)';
           document.getElementById('status-text').textContent = data.attempt + '차 반려 → 재시도 중';
           break;
 
@@ -488,15 +618,16 @@ function getHTML(): string {
           document.getElementById('status-text').textContent = data.agentName + ' 완료';
           break;
 
-        case 'complete':
+        case 'complete': {
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
           document.getElementById('final-report').textContent = data.finalReport;
           document.getElementById('report-stats').textContent =
             \`\${elapsed}s · 에이전트 \${data.agentsExecuted}개 · MCP: \${data.mcpToolsUsed.join(', ')}\`;
           document.getElementById('report-section').classList.remove('hidden');
-          renderRetryReport(data.retryReport);
+          renderRetryReport(data.retryReport, targetScore);
           document.getElementById('retry-report-section').scrollIntoView({ behavior: 'smooth' });
           break;
+        }
 
         case 'error':
           showGlobalError(data.message);

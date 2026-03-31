@@ -58,11 +58,15 @@ api.get("/tools", (c) => {
 api.post("/harness", async (c) => {
   try {
     const body = await c.req.json();
-    const { query, apiKey, projectId = "" } = body;
+    const { query, apiKey, projectId = "", maxRetry = 3, targetScore = 80 } = body;
     
     if (!query || !apiKey) {
       return c.json({ error: "query와 apiKey가 필요합니다" }, 400);
     }
+
+    // 값 범위 보정
+    const safeMaxRetry = Math.max(0, Math.min(10, Number(maxRetry) || 3));
+    const safeTargetScore = Math.max(0, Math.min(100, Number(targetScore) || 80));
     
     // SSE 스트림 반환
     // 각 에이전트 완료시마다 이벤트를 전송합니다
@@ -90,12 +94,11 @@ api.post("/harness", async (c) => {
               apiKey,
               (agentLog, retryEvent) => {
                 if (retryEvent) {
-                  // 반려 이벤트 별도 전송
                   sendEvent("retry_event", retryEvent);
                 }
                 sendEvent("agent_complete", agentLog);
               },
-              projectId
+              { projectId: projectId, maxRetry: safeMaxRetry, targetScore: safeTargetScore }
             );
             
             // 최종 완료 이벤트

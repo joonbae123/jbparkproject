@@ -253,7 +253,8 @@ export async function runCriticJudgement(
   query: string,
   apiKey: string,
   projectId: string = "",
-  attempt: number = 1
+  attempt: number = 1,
+  targetScore: number = 80   // 합격 기준 점수 (오케스트레이터에서 전달)
 ): Promise<{ log: AgentLog; judgement: CriticJudgement }> {
 
   const startTime = Date.now();
@@ -286,9 +287,9 @@ export async function runCriticJudgement(
     const systemPrompt = `당신은 엄격한 품질 관리 비평가입니다.
 리서치 결과와 분석 내용을 검토하고 반드시 아래 JSON 형식으로만 응답하세요.
 
-판정 기준:
-- 점수 80점 이상: 승인 (approved)
-- 점수 79점 이하: 반려 (rejected)
+판정 기준 (사용자가 설정한 목표 점수):
+- 점수 ${targetScore}점 이상: 승인 (approved)
+- 점수 ${targetScore - 1}점 이하: 반려 (rejected)
 
 엄격하게 평가하세요. 첫 시도는 특히 까다롭게 검토하세요.
 
