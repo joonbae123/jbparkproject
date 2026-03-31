@@ -609,42 +609,45 @@ function getHTML(): string {
     }
   </script>
 
-  <!-- 개발 하네스 섹션 v6 -->
+  <!-- 개발 하네스 섹션 v6 대형 프로젝트 모드 -->
   <div id="section-dev" class="hidden max-w-5xl mx-auto px-6 py-6 space-y-5">
 
-    <!-- v5 vs v6 비교 설명 -->
+    <!-- 설명 카드 -->
     <div class="bg-gray-900 rounded-xl p-4 border border-green-800">
       <h2 class="text-xs font-semibold text-green-300 mb-3 flex items-center gap-2">
-        <i class="fas fa-code text-green-400"></i> 개발 하네스 v6 - AI가 코드를 짜고 실행하고 고칩니다
+        <i class="fas fa-project-diagram text-green-400"></i>
+        개발 하네스 v6 — 대형 프로젝트 모드 · AI가 태스크를 쪼개고, 코드를 짜고, 실행하고, 고칩니다
       </h2>
-      <div class="grid grid-cols-3 gap-3 text-xs">
+      <div class="grid grid-cols-4 gap-2 text-xs">
         <div class="bg-gray-800 rounded-lg p-3 border border-gray-600 text-center">
-          <div class="text-2xl mb-1">🎯</div>
-          <div class="text-yellow-300 font-semibold">PM 에이전트</div>
-          <div class="text-gray-400 mt-1">요구사항 분석<br/>기술 명세서 작성</div>
+          <div class="text-xl mb-1">🗂️</div>
+          <div class="text-yellow-300 font-semibold">TaskDecomposer</div>
+          <div class="text-gray-400 mt-1">요청을 3~8개<br/>독립 태스크로 분해</div>
         </div>
         <div class="bg-gray-800 rounded-lg p-3 border border-gray-600 text-center">
-          <div class="text-2xl mb-1">💻</div>
-          <div class="text-blue-300 font-semibold">Developer 에이전트</div>
-          <div class="text-gray-400 mt-1">코드 작성<br/>실행 검증 (Node.js)</div>
+          <div class="text-xl mb-1">💻</div>
+          <div class="text-blue-300 font-semibold">Developer</div>
+          <div class="text-gray-400 mt-1">파일별 코드 작성<br/>Node.js 실행 검증</div>
         </div>
         <div class="bg-gray-800 rounded-lg p-3 border border-gray-600 text-center">
-          <div class="text-2xl mb-1">🔍</div>
-          <div class="text-purple-300 font-semibold">Reviewer 에이전트</div>
+          <div class="text-xl mb-1">🔍</div>
+          <div class="text-purple-300 font-semibold">Reviewer</div>
           <div class="text-gray-400 mt-1">코드 품질 검토<br/>0~100점 평가</div>
         </div>
-      </div>
-      <div class="mt-3 bg-green-900/20 border border-green-800 rounded-lg p-3 text-xs">
-        <div class="text-green-400 font-semibold mb-1">🧪 QA Tester 에이전트</div>
-        <div class="text-gray-300">테스트 코드 작성 → <code class="bg-gray-700 px-1 rounded">node test.js</code> 실행 → 통과/실패 판정 → <strong>실행 결과가 다음 판단의 근거</strong></div>
+        <div class="bg-gray-800 rounded-lg p-3 border border-green-700 text-center">
+          <div class="text-xl mb-1">📦</div>
+          <div class="text-green-300 font-semibold">ZIP 다운로드</div>
+          <div class="text-gray-400 mt-1">전체 파일을<br/>한 번에 다운로드</div>
+        </div>
       </div>
       <div class="mt-2 text-xs text-gray-500 bg-gray-800 rounded p-2">
-        <span class="text-green-400">핵심 차이:</span> v5는 "정보를 분석" | v6는 <strong class="text-white">"실제 코드를 작성하고 Node.js로 직접 실행"</strong>
-        — 에러 메시지, 테스트 통과 여부가 정량적 피드백으로 사용됨
+        <span class="text-green-400">v6 핵심:</span>
+        큰 요청 → <strong class="text-white">태스크 분해</strong> → 파일별 <strong class="text-white">코드 작성+실행</strong> → 전체 <strong class="text-white">ZIP 패키징</strong>
+        — "이걸 어떻게 실행하나요?" → <strong class="text-green-300">ZIP에 README.md 포함</strong>
       </div>
     </div>
 
-    <!-- 개발 요청 입력 -->
+    <!-- 입력 폼 -->
     <div class="bg-gray-900 rounded-xl p-5 border border-gray-700 space-y-4">
       <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2">
         <i class="fas fa-terminal text-green-400"></i> 개발 요청
@@ -653,111 +656,144 @@ function getHTML(): string {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label class="block text-xs text-gray-400 mb-1">
-            <i class="fas fa-key text-green-400 mr-1"></i>OpenAI API Key <span class="text-gray-600">(개발자/리뷰어/QA 에이전트용)</span>
+            <i class="fas fa-key text-green-400 mr-1"></i>OpenAI API Key
+            <span class="text-gray-600">(Developer·Reviewer 에이전트)</span>
           </label>
           <input id="dev-api-key" type="password" placeholder="sk-proj-..."
             class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-green-500"/>
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1">
-            <i class="fas fa-key text-purple-400 mr-1"></i>Anthropic API Key <span class="text-gray-600">(Claude 팀원 조율용)</span>
+            <i class="fas fa-key text-purple-400 mr-1"></i>Anthropic API Key
+            <span class="text-gray-600">(TaskDecomposer·오케스트레이터 — 선택)</span>
           </label>
           <input id="dev-anthropic-key" type="password" placeholder="sk-ant-..."
             class="w-full bg-gray-800 border border-purple-800 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500"/>
-          <div class="text-xs text-gray-600 mt-1">비워두면 기본 순서로 실행 (PM→Dev→Review→QA)</div>
+          <div class="text-xs text-gray-600 mt-1">비워두면 GPT-4o-mini로 태스크 분해</div>
         </div>
       </div>
 
-      <!-- 빠른 예시 버튼 -->
+      <!-- 빠른 예시 -->
       <div>
-        <div class="text-xs text-gray-500 mb-2">예시 개발 요청:</div>
+        <div class="text-xs text-gray-500 mb-2">예시 요청:</div>
         <div class="flex flex-wrap gap-2">
           <button onclick="setDevRequest('숫자 배열을 받아 버블 정렬하는 함수를 구현해줘. 오름차순/내림차순 옵션 포함.')"
             class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs transition-colors">
-            🔢 배열 정렬 함수
+            🔢 배열 정렬
           </button>
           <button onclick="setDevRequest('문자열에서 한글/영어/숫자 각각의 글자 수를 세는 함수를 구현해줘. 공백은 제외.')"
             class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs transition-colors">
-            📝 문자열 분석기
+            📝 문자열 분석
           </button>
           <button onclick="setDevRequest('간단한 계산기를 구현해줘. 덧셈, 뺄셈, 곱셈, 나눗셈. 0으로 나누기 에러 처리 포함.')"
             class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs transition-colors">
             🧮 계산기 모듈
           </button>
-          <button onclick="setDevRequest('MES 작업자별 시간 활용도(Time Utilization Rate)를 계산하는 함수를 구현해줘. 총 근무시간 대비 실제 작업시간 비율. 이상값(0% 미만, 100% 초과) 필터링 포함.')"
+          <button onclick="setDevRequest('MES 작업자별 시간 활용도(Time Utilization Rate)를 계산하는 함수를 구현해줘. 총 근무시간 대비 실제 작업시간 비율. 이상값(0% 미만, 100% 초과) 필터링 포함. 그리고 작업 효율(Work Efficiency)도 함께 계산해줘: 실제 생산량 / 이론 생산량.')"
             class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs transition-colors">
-            🏭 MES 시간 활용도
+            🏭 MES KPI 계산기
+          </button>
+          <button onclick="setDevRequest('학생 성적 데이터를 입력받아 평균, 중앙값, 표준편차를 계산하고, A~F 학점을 부여하는 시스템을 구현해줘. 결과를 콘솔에 표로 출력.')"
+            class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs transition-colors">
+            📊 성적 처리 시스템
           </button>
         </div>
       </div>
 
       <div>
         <label class="block text-xs text-gray-400 mb-1">개발 요청 내용</label>
-        <textarea id="dev-request" rows="3" placeholder="어떤 코드를 만들까요? 구체적으로 요청할수록 좋습니다.&#10;예: '이름과 점수 배열을 받아 상위 N명을 반환하는 함수를 만들어줘. 동점자 처리 포함.'"
+        <textarea id="dev-request" rows="4"
+          placeholder="어떤 코드를 만들까요? 복잡한 프로젝트도 OK — AI가 자동으로 작은 태스크들로 분해합니다.&#10;예: 'MES 분석 시스템 구현. KPI 계산(시간 활용도·작업 효율), Grade 분류(A~F), 통계 리포트 출력'"
           class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-green-500 resize-none"></textarea>
       </div>
 
       <button id="dev-run-btn" onclick="runDevHarness()"
         class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
-        <i class="fas fa-play-circle"></i>
-        개발 하네스 실행 (AI 팀이 코드를 작성합니다)
+        <i class="fas fa-rocket"></i>
+        개발 하네스 실행 — AI가 태스크를 분해하고 파일을 생성합니다
       </button>
     </div>
 
-    <!-- 개발 진행 상황 -->
+    <!-- 진행 상황 -->
     <div id="dev-progress-section" class="hidden space-y-4">
 
-      <!-- 세션 정보 -->
+      <!-- 세션 헤더 + 상태바 -->
       <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <div class="flex items-center justify-between">
-          <div class="text-sm font-semibold text-gray-300 flex items-center gap-2">
-            <i class="fas fa-folder-open text-yellow-400"></i>
-            작업 세션
+        <div class="flex items-center justify-between flex-wrap gap-3 mb-3">
+          <div>
+            <div class="text-sm font-semibold text-gray-300 flex items-center gap-2">
+              <i class="fas fa-folder-open text-yellow-400"></i>
+              <span id="dev-project-name-header">작업 세션</span>
+              <span id="dev-session-id" class="text-xs text-gray-500 font-mono"></span>
+            </div>
+            <div class="mt-1 flex gap-4 text-xs text-gray-400">
+              <span>태스크: <strong id="dev-task-progress" class="text-white">0/0</strong></span>
+              <span>파일: <strong id="dev-file-count" class="text-green-400">0</strong>개</span>
+              <span id="dev-tech-stack-badge" class="text-gray-600"></span>
+            </div>
           </div>
-          <div id="dev-session-id" class="text-xs text-gray-500 font-mono"></div>
+          <!-- 다운로드 버튼 (완료 시 표시) -->
+          <a id="dev-download-btn" href="#" target="_blank"
+            class="hidden items-center gap-2 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            <i class="fas fa-download"></i> ZIP 다운로드
+          </a>
         </div>
-        <div class="mt-2 flex gap-4 text-xs text-gray-400">
-          <span>단계: <strong id="dev-step-count" class="text-white">0</strong></span>
-          <span>파일: <strong id="dev-file-count" class="text-green-400">0</strong>개</span>
-          <span>품질: <strong id="dev-quality-score" class="text-yellow-400">-</strong></span>
-        </div>
-      </div>
-
-      <!-- Claude 전략 -->
-      <div id="dev-strategy-card" class="hidden bg-purple-900/20 rounded-xl p-4 border border-purple-700">
-        <div class="text-xs font-semibold text-purple-300 mb-2 flex items-center gap-2">
-          <i class="fas fa-brain text-purple-400"></i>
-          Claude의 개발 전략
-        </div>
-        <div id="dev-strategy-text" class="text-sm text-gray-300"></div>
-        <div class="mt-2 flex gap-3 text-xs">
-          <span class="text-gray-400">예상 단계: <strong id="dev-estimated-steps" class="text-purple-300">-</strong></span>
-          <span class="text-gray-400">기술 스택: <strong id="dev-tech-stack" class="text-blue-300">-</strong></span>
+        <!-- 태스크 진행바 -->
+        <div class="w-full bg-gray-800 rounded-full h-1.5">
+          <div id="dev-progress-bar" class="bg-green-500 h-1.5 rounded-full transition-all duration-500" style="width:0%"></div>
         </div>
       </div>
 
-      <!-- 팀원 작업 로그 -->
+      <!-- TaskDecomposer 결과 -->
+      <div id="dev-task-list" class="hidden bg-gray-900 rounded-xl border border-yellow-800 overflow-hidden">
+        <div class="px-4 py-3 border-b border-yellow-800/50 flex items-center gap-2 bg-yellow-900/10">
+          <i class="fas fa-list-check text-yellow-400"></i>
+          <span class="text-sm font-semibold text-yellow-300">🗂️ 태스크 분해 결과</span>
+          <span id="dev-decompose-meta" class="text-xs text-gray-500 ml-auto"></span>
+        </div>
+        <div id="dev-task-items" class="p-3 grid grid-cols-1 gap-2"></div>
+      </div>
+
+      <!-- 실행 로그 -->
       <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-700 flex items-center gap-2">
-          <i class="fas fa-users text-green-400"></i>
-          <span class="text-sm font-semibold text-gray-300">개발 팀 작업 로그</span>
+          <i class="fas fa-terminal text-green-400"></i>
+          <span class="text-sm font-semibold text-gray-300">실행 로그</span>
+          <span class="text-xs text-gray-500 ml-auto">AI 팀의 실시간 작업 현황</span>
         </div>
-        <div id="dev-agent-log" class="p-4 space-y-3 max-h-[600px] overflow-y-auto">
-          <div class="text-xs text-gray-500 text-center py-4">개발 하네스를 실행하면 팀원들의 작업이 여기에 표시됩니다</div>
+        <div id="dev-agent-log" class="p-4 space-y-3 max-h-[700px] overflow-y-auto">
+          <div class="text-xs text-gray-500 text-center py-6">
+            <i class="fas fa-hourglass-start text-gray-600 text-2xl mb-2 block"></i>
+            개발 하네스를 실행하면 AI 팀의 작업이 여기에 표시됩니다
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 최종 결과 -->
-    <div id="dev-result-section" class="hidden space-y-4">
+    <!-- 최종 완료 카드 -->
+    <div id="dev-result-section" class="hidden">
       <div class="bg-gray-900 rounded-xl p-5 border border-green-700">
-        <div class="flex items-center gap-2 mb-3">
-          <i class="fas fa-check-circle text-green-400 text-xl"></i>
-          <h3 class="text-base font-bold text-green-300">개발 완료!</h3>
-          <div id="dev-final-score" class="ml-auto text-sm font-bold text-yellow-300"></div>
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+          <i class="fas fa-check-circle text-green-400 text-2xl"></i>
+          <div>
+            <h3 class="text-base font-bold text-green-300">개발 완료!</h3>
+            <div id="dev-result-summary" class="text-xs text-gray-400 mt-0.5"></div>
+          </div>
+          <a id="dev-result-download-btn" href="#" target="_blank"
+            class="ml-auto flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl transition-colors shadow-lg">
+            <i class="fas fa-download"></i> ZIP 다운로드
+          </a>
         </div>
-        <div id="dev-result-summary" class="text-sm text-gray-300 mb-3"></div>
-        <div id="dev-files-list" class="space-y-1"></div>
+        <div class="mb-3">
+          <div class="text-xs text-gray-500 mb-2">생성된 파일:</div>
+          <div id="dev-files-list" class="grid grid-cols-2 md:grid-cols-3 gap-2"></div>
+        </div>
+        <div class="text-xs text-gray-600 bg-gray-800 rounded p-3 font-mono">
+          <div class="text-green-400 mb-1">실행 방법:</div>
+          <div>1. ZIP 다운로드 → 압축 해제</div>
+          <div>2. <span class="text-white">node solution.js</span> 실행</div>
+          <div>3. README.md 참고</div>
+        </div>
       </div>
     </div>
   </div>
@@ -794,10 +830,11 @@ function getHTML(): string {
 
     // ─── 역할별 스타일 ───
     const DEV_ROLE_STYLE = {
-      pm:         { emoji: '🎯', color: 'yellow', label: 'PM 에이전트' },
-      developer:  { emoji: '💻', color: 'blue',   label: '개발자 에이전트' },
-      reviewer:   { emoji: '🔍', color: 'purple', label: '코드 리뷰어' },
-      qa_tester:  { emoji: '🧪', color: 'green',  label: 'QA 테스터' }
+      decomposer: { emoji: '🗂️', color: 'yellow',  label: 'TaskDecomposer' },
+      pm:         { emoji: '🎯', color: 'yellow',  label: 'PM 에이전트' },
+      developer:  { emoji: '💻', color: 'blue',    label: '개발자 에이전트' },
+      reviewer:   { emoji: '🔍', color: 'purple',  label: '코드 리뷰어' },
+      qa_tester:  { emoji: '🧪', color: 'green',   label: 'QA 테스터' }
     };
 
     const COLOR_MAP = {
@@ -828,7 +865,7 @@ function getHTML(): string {
                   \${tc.args.filename ? \`<span class="text-gray-500 ml-1">→ \${tc.args.filename}</span>\` : ''}
                   <details class="mt-1">
                     <summary class="text-gray-500 cursor-pointer hover:text-gray-300">결과 보기</summary>
-                    <pre class="text-gray-400 mt-1 text-xs overflow-x-auto">\${tc.result.slice(0, 600)}\${tc.result.length > 600 ? '\\n...(생략)' : ''}</pre>
+                    <pre class="text-gray-400 mt-1 text-xs overflow-x-auto whitespace-pre-wrap">\${tc.result.slice(0, 600)}\${tc.result.length > 600 ? '\\n...(생략)' : ''}</pre>
                   </details>
                 </div>
               </div>\`;
@@ -849,7 +886,7 @@ function getHTML(): string {
       const outputHtml = data.output
         ? \`<details class="mt-2">
             <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-200">에이전트 출력 보기</summary>
-            <pre class="mt-1 text-xs text-gray-300 bg-gray-800 rounded p-2 overflow-x-auto max-h-48">\${data.output.slice(0, 1200)}\${data.output.length > 1200 ? '\\n...(생략)' : ''}</pre>
+            <pre class="mt-1 text-xs text-gray-300 bg-gray-800 rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap">\${data.output.slice(0, 1500)}\${data.output.length > 1500 ? '\\n...(생략)' : ''}</pre>
            </details>\`
         : '';
 
@@ -859,7 +896,7 @@ function getHTML(): string {
         <div class="flex items-center gap-2 mb-2">
           <span class="text-lg">\${style.emoji}</span>
           <span class="text-sm font-semibold text-gray-200">\${style.label}</span>
-          <span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">Step \${data.stepCount || '?'}</span>
+          \${data.stepCount ? \`<span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">Task \${data.stepCount}</span>\` : ''}
           \${scoreHtml}
           <span class="ml-auto text-xs text-gray-500">\${data.duration ? (data.duration/1000).toFixed(1)+'s' : ''}</span>
         </div>
@@ -868,6 +905,41 @@ function getHTML(): string {
         \${outputHtml}
       \`;
       document.getElementById('dev-agent-log').appendChild(card);
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // ─── 태스크 항목 렌더링 ───
+    function renderTaskItem(task, status = 'pending') {
+      const statusIcon = {
+        pending:  '<i class="fas fa-clock text-gray-500"></i>',
+        running:  '<i class="fas fa-spinner fa-spin text-blue-400"></i>',
+        done:     '<i class="fas fa-check-circle text-green-400"></i>',
+        failed:   '<i class="fas fa-times-circle text-red-400"></i>'
+      }[status] || '';
+
+      const el = document.getElementById(\`task-item-\${task.id}\`);
+      const html = \`
+        <div class="flex items-start gap-3 p-2 rounded-lg bg-gray-800 border border-gray-700">
+          <span class="mt-0.5">\${statusIcon}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-gray-300">Task \${task.id}</span>
+              <span class="text-xs text-gray-400 truncate">\${task.title}</span>
+            </div>
+            <div class="text-xs text-gray-600 font-mono mt-0.5">\${task.filename}</div>
+          </div>
+        </div>
+      \`;
+
+      if (el) {
+        el.outerHTML = \`<div id="task-item-\${task.id}">\${html}</div>\`;
+      } else {
+        const container = document.getElementById('dev-task-items');
+        const div = document.createElement('div');
+        div.id = \`task-item-\${task.id}\`;
+        div.innerHTML = html;
+        container.appendChild(div);
+      }
     }
 
     // ─── 개발 하네스 실행 ───
@@ -880,17 +952,30 @@ function getHTML(): string {
       if (!devRequest) { alert('개발 요청을 입력하세요'); return; }
 
       // UI 초기화
-      document.getElementById('dev-run-btn').disabled = true;
-      document.getElementById('dev-run-btn').innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>개발 중...';
+      const runBtn = document.getElementById('dev-run-btn');
+      runBtn.disabled = true;
+      runBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>AI 팀 작업 중...';
+
       document.getElementById('dev-progress-section').classList.remove('hidden');
       document.getElementById('dev-result-section').classList.add('hidden');
-      document.getElementById('dev-agent-log').innerHTML = '';
-      document.getElementById('dev-strategy-card').classList.add('hidden');
-      document.getElementById('dev-step-count').textContent = '0';
+      document.getElementById('dev-task-list').classList.add('hidden');
+      document.getElementById('dev-agent-log').innerHTML = \`
+        <div class="text-xs text-gray-500 text-center py-4">
+          <i class="fas fa-robot text-gray-600 text-xl mb-2 block"></i>
+          AI 팀이 작업을 시작합니다...
+        </div>
+      \`;
+      document.getElementById('dev-download-btn').classList.add('hidden');
+      document.getElementById('dev-download-btn').classList.remove('flex');
+      document.getElementById('dev-task-items').innerHTML = '';
       document.getElementById('dev-file-count').textContent = '0';
-      document.getElementById('dev-quality-score').textContent = '-';
+      document.getElementById('dev-task-progress').textContent = '0/0';
+      document.getElementById('dev-progress-bar').style.width = '0%';
+      document.getElementById('dev-session-id').textContent = '';
 
-      let stepCount = 0;
+      let currentSessionId = '';
+      let totalTasks = 0;
+      let doneTasks = 0;
       const allFiles = new Set();
 
       try {
@@ -899,6 +984,10 @@ function getHTML(): string {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ devRequest, apiKey, anthropicKey })
         });
+
+        if (!response.ok) {
+          throw new Error(\`서버 오류: \${response.status}\`);
+        }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -909,7 +998,7 @@ function getHTML(): string {
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
-          // SSE는 빈 줄로 이벤트 블록을 구분함
+          // SSE 블록 단위 파싱 (빈 줄로 구분)
           const blocks = buffer.split('\\n\\n');
           buffer = blocks.pop() || '';
 
@@ -922,68 +1011,111 @@ function getHTML(): string {
 
               for (const bline of blockLines) {
                 if (bline.startsWith('event:')) eventType = bline.slice(6).trim();
-                if (bline.startsWith('data:')) dataStr = bline.slice(5).trim();
+                if (bline.startsWith('data:'))  dataStr = bline.slice(5).trim();
               }
 
               if (!dataStr) continue;
               const data = JSON.parse(dataStr);
 
-              if (eventType === 'dev_start') {
-                document.getElementById('dev-session-id').textContent = data.sessionId;
+              // ── 이벤트 처리 ──
+              switch (eventType) {
 
-              } else if (eventType === 'dev_strategy') {
-                document.getElementById('dev-strategy-card').classList.remove('hidden');
-                document.getElementById('dev-strategy-text').textContent = data.strategy;
-                document.getElementById('dev-estimated-steps').textContent = data.estimatedSteps + '단계';
-                document.getElementById('dev-tech-stack').textContent = data.techStack;
+                case 'dev_start':
+                  currentSessionId = data.sessionId;
+                  document.getElementById('dev-session-id').textContent = data.sessionId.slice(-12);
+                  document.getElementById('dev-agent-log').innerHTML = '';
+                  break;
 
-              } else if (eventType === 'dev_decision') {
-                stepCount++;
-                document.getElementById('dev-step-count').textContent = stepCount;
+                case 'dev_decompose':
+                  totalTasks = data.totalTasks;
+                  document.getElementById('dev-task-progress').textContent = \`0/\${totalTasks}\`;
+                  document.getElementById('dev-project-name-header').textContent = data.projectName || '작업 세션';
+                  document.getElementById('dev-tech-stack-badge').textContent = data.techStack || '';
+                  document.getElementById('dev-decompose-meta').textContent =
+                    \`\${data.totalTasks}개 태스크 · \${data.techStack || 'Node.js'}\`;
+                  document.getElementById('dev-task-list').classList.remove('hidden');
 
-                // 결정 카드 추가
-                const decisionEl = document.createElement('div');
-                decisionEl.className = 'fade-in bg-purple-900/10 border border-purple-800 rounded-lg p-3 text-xs';
-                decisionEl.innerHTML = \`
-                  <div class="flex items-center gap-2 text-purple-300 mb-1">
-                    <i class="fas fa-brain"></i>
-                    <strong>Claude 결정 #\${stepCount}</strong>
-                    <span class="text-gray-500 ml-auto">\${(DEV_ROLE_STYLE[data.nextRole]||{}).emoji||'?'} \${data.nextRole}</span>
-                  </div>
-                  <div class="text-gray-400">\${data.reasoning}</div>
-                  <div class="text-gray-500 mt-1 border-t border-gray-700 pt-1">지시: \${data.instruction.slice(0, 150)}</div>
-                \`;
-                document.getElementById('dev-agent-log').appendChild(decisionEl);
+                  // 태스크 목록 렌더링
+                  data.tasks.forEach(t => renderTaskItem(t, 'pending'));
+                  break;
 
-              } else if (eventType === 'dev_agent') {
-                renderDevAgentCard(data);
-                if (data.filesCreated) {
-                  data.filesCreated.forEach(f => allFiles.add(f));
-                  document.getElementById('dev-file-count').textContent = allFiles.size;
-                }
-                if (data.qualityScore != null) {
-                  document.getElementById('dev-quality-score').textContent = data.qualityScore + '점';
-                }
+                case 'dev_task_start':
+                  renderTaskItem(data, 'running');
+                  // 태스크 시작 알림 카드
+                  const startEl = document.createElement('div');
+                  startEl.className = 'fade-in text-xs bg-yellow-900/20 border border-yellow-700 rounded-lg px-3 py-2 flex items-center gap-2';
+                  startEl.innerHTML = \`
+                    <i class="fas fa-play text-yellow-400"></i>
+                    <strong class="text-yellow-300">태스크 \${data.taskId}/\${data.totalTasks}</strong>
+                    <span class="text-gray-300">\${data.title}</span>
+                    <span class="ml-auto font-mono text-gray-500">\${data.filename}</span>
+                  \`;
+                  document.getElementById('dev-agent-log').appendChild(startEl);
+                  startEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  break;
 
-              } else if (eventType === 'dev_complete') {
-                // 최종 결과 표시
-                const scoreText = data.qualityScore != null ? \`품질 \${data.qualityScore}점\` : '';
-                document.getElementById('dev-final-score').textContent = scoreText;
-                document.getElementById('dev-result-summary').textContent = data.summary;
+                case 'dev_decision':
+                  // 오케스트레이터 결정 카드 (간략)
+                  const decisionEl = document.createElement('div');
+                  decisionEl.className = 'fade-in text-xs bg-purple-900/10 border border-purple-800 rounded-lg px-3 py-2 flex items-center gap-2';
+                  decisionEl.innerHTML = \`
+                    <i class="fas fa-brain text-purple-400"></i>
+                    <span class="text-purple-300">\${(DEV_ROLE_STYLE[data.nextRole]||{}).emoji||'?'} \${data.nextRole}</span>
+                    <span class="text-gray-500 truncate">\${data.reasoning}</span>
+                  \`;
+                  document.getElementById('dev-agent-log').appendChild(decisionEl);
+                  break;
 
-                const filesHtml = data.filesCreated.map(f =>
-                  \`<div class="text-xs font-mono bg-gray-800 rounded px-3 py-2 text-green-300">
-                    <i class="fas fa-file-code text-blue-400 mr-2"></i>\${f}
-                   </div>\`
-                ).join('');
-                document.getElementById('dev-files-list').innerHTML = filesHtml || '<div class="text-xs text-gray-500">생성된 파일 없음</div>';
-                document.getElementById('dev-result-section').classList.remove('hidden');
+                case 'dev_agent':
+                  renderDevAgentCard(data);
+                  if (data.filesCreated) {
+                    data.filesCreated.forEach(f => allFiles.add(f));
+                    document.getElementById('dev-file-count').textContent = allFiles.size;
+                  }
+                  break;
 
-              } else if (eventType === 'dev_error') {
-                const errEl = document.createElement('div');
-                errEl.className = 'bg-red-900/20 border border-red-700 rounded-lg p-3 text-xs text-red-300';
-                errEl.innerHTML = \`<i class="fas fa-exclamation-triangle mr-1"></i>\${data.message}\`;
-                document.getElementById('dev-agent-log').appendChild(errEl);
+                case 'dev_task_done':
+                  doneTasks++;
+                  renderTaskItem(data, data.success ? 'done' : 'failed');
+                  document.getElementById('dev-task-progress').textContent = \`\${doneTasks}/\${totalTasks}\`;
+                  const pct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+                  document.getElementById('dev-progress-bar').style.width = pct + '%';
+                  break;
+
+                case 'dev_complete':
+                  // 진행바 100%
+                  document.getElementById('dev-progress-bar').style.width = '100%';
+                  document.getElementById('dev-task-progress').textContent = \`\${data.successTasks}/\${data.totalTasks}\`;
+
+                  // 다운로드 버튼 활성화 (헤더)
+                  const dlBtn = document.getElementById('dev-download-btn');
+                  dlBtn.href = data.downloadUrl;
+                  dlBtn.classList.remove('hidden');
+                  dlBtn.classList.add('flex');
+
+                  // 최종 결과 섹션
+                  document.getElementById('dev-result-summary').textContent = data.summary;
+
+                  const filesHtml = (data.filesCreated || []).map(f =>
+                    \`<div class="text-xs font-mono bg-gray-800 border border-gray-700 rounded px-3 py-2 text-green-300 flex items-center gap-2">
+                      <i class="fas fa-file-code text-blue-400"></i>\${f}
+                    </div>\`
+                  ).join('') || '<div class="text-xs text-gray-500">생성된 파일 없음</div>';
+
+                  document.getElementById('dev-files-list').innerHTML = filesHtml;
+
+                  // 다운로드 버튼 (결과 섹션)
+                  document.getElementById('dev-result-download-btn').href = data.downloadUrl;
+                  document.getElementById('dev-result-section').classList.remove('hidden');
+                  document.getElementById('dev-result-section').scrollIntoView({ behavior: 'smooth' });
+                  break;
+
+                case 'dev_error':
+                  const errEl = document.createElement('div');
+                  errEl.className = 'fade-in bg-red-900/20 border border-red-700 rounded-lg p-3 text-xs text-red-300';
+                  errEl.innerHTML = \`<i class="fas fa-exclamation-triangle mr-2"></i>\${data.message}\`;
+                  document.getElementById('dev-agent-log').appendChild(errEl);
+                  break;
               }
 
             } catch(e) { /* JSON 파싱 실패 무시 */ }
@@ -992,12 +1124,12 @@ function getHTML(): string {
 
       } catch (err) {
         const errEl = document.createElement('div');
-        errEl.className = 'bg-red-900/20 border border-red-700 rounded-lg p-3 text-xs text-red-300';
-        errEl.innerHTML = \`<i class="fas fa-exclamation-triangle mr-1"></i>연결 오류: \${err.message}\`;
+        errEl.className = 'fade-in bg-red-900/20 border border-red-700 rounded-lg p-3 text-xs text-red-300';
+        errEl.innerHTML = \`<i class="fas fa-exclamation-triangle mr-2"></i>연결 오류: \${err.message}\`;
         document.getElementById('dev-agent-log').appendChild(errEl);
       } finally {
-        document.getElementById('dev-run-btn').disabled = false;
-        document.getElementById('dev-run-btn').innerHTML = '<i class="fas fa-play-circle mr-2"></i>개발 하네스 실행 (AI 팀이 코드를 작성합니다)';
+        runBtn.disabled = false;
+        runBtn.innerHTML = '<i class="fas fa-rocket mr-2"></i>개발 하네스 실행 — AI가 태스크를 분해하고 파일을 생성합니다';
       }
     }
   </script>

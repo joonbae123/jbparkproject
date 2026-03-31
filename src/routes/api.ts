@@ -1,10 +1,12 @@
 /**
  * API 라우트 정의
  *
- * POST /api/harness      - 리서치 하네스 실행 (SSE 스트리밍, v5)
- * POST /api/dev-harness  - 개발 하네스 실행 (SSE 스트리밍, v6)
- * GET  /api/tools        - 사용 가능한 MCP 도구 목록 조회
- * GET  /api/health       - 서버 상태 확인
+ * POST /api/harness              - 리서치 하네스 실행 (SSE, v5)
+ * POST /api/dev-harness          - 개발 하네스 실행 (SSE, v6 대형 프로젝트)
+ * GET  /api/download/:sessionId  - 세션 결과물 ZIP 다운로드
+ * GET  /api/session/:sessionId   - 세션 파일 목록 조회
+ * GET  /api/tools                - MCP 도구 목록
+ * GET  /api/health               - 서버 상태
  */
 
 import { Hono } from "hono";
@@ -13,31 +15,30 @@ import { runHarness } from "../harness/orchestrator.js";
 import { MCP_TOOLS } from "../mcp/tools.js";
 import { DEV_MCP_TOOLS } from "../mcp/dev-tools.js";
 import { runDevAgent } from "../harness/dev-agent.js";
-import { decideDevFirstStep, decideDevNextStep } from "../harness/dev-orchestrator.js";
-import type { DevCompletedStep } from "../harness/dev-orchestrator.js";
+import { decomposeProject } from "../harness/task-decomposer.js";
+import { createZipBuffer } from "../harness/zip-builder.js";
+import { getSessionPath } from "../mcp/dev-tools.js";
+import * as fs from "fs";
+import * as path from "path";
 
 const api = new Hono();
-
-// CORS 설정
 api.use("*", cors());
 
-/**
- * GET /api/health
- */
+// ─────────────────────────────────────
+// GET /api/health
+// ─────────────────────────────────────
 api.get("/health", (c) => {
   return c.json({
     status: "ok",
     message: "AI Harness + MCP Demo Server",
-    version: "v6-dev-harness",
-    mcpTools: MCP_TOOLS.map(t => ({ name: t.name, description: t.description })),
-    devTools: DEV_MCP_TOOLS.map(t => ({ name: t.name, description: t.description })),
+    version: "v6-large-project",
     timestamp: new Date().toISOString()
   });
 });
 
-/**
- * GET /api/tools
- */
+// ─────────────────────────────────────
+// GET /api/tools
+// ─────────────────────────────────────
 api.get("/tools", (c) => {
   return c.json({
     researchTools: MCP_TOOLS,
@@ -46,20 +47,63 @@ api.get("/tools", (c) => {
   });
 });
 
-/**
- * POST /api/harness - 기존 리서치 하네스 (v5 유지)
- */
+// ─────────────────────────────────────
+// GET /api/session/:sessionId  - 세션 파일 목록
+// ─────────────────────────────────────
+api.get("/session/:sessionId", (c) => {
+  const sessionId = c.req.param("sessionId");
+  const sessionPath = getSessionPath(sessionId);
+
+  if (!fs.existsSync(sessionPath)) {
+    return c.json({ files: [], sessionId });
+  }
+
+  const files = fs.readdirSync(sessionPath).map(f => {
+    const fPath = path.join(sessionPath, f);
+    const stat = fs.statSync(fPath);
+    return {
+      name: f,
+      size: stat.size,
+      modified: stat.mtime.toISOString()
+    };
+  });
+
+  return c.json({ files, sessionId, count: files.length });
+});
+
+// ─────────────────────────────────────
+// GET /api/download/:sessionId  - ZIP 다운로드
+// ─────────────────────────────────────
+api.get("/download/:sessionId", (c) => {
+  const sessionId = c.req.param("sessionId");
+  const projectName = c.req.query("name") || "ai-harness-project";
+
+  try {
+    const zipBuffer = createZipBuffer(sessionId, projectName);
+    const filename = `${projectName.replace(/\s+/g, "-")}-${sessionId.slice(-5)}.zip`;
+
+    return new Response(zipBuffer, {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(zipBuffer.length)
+      }
+    });
+  } catch (err) {
+    return c.json({
+      error: "ZIP 생성 실패",
+      detail: err instanceof Error ? err.message : "알 수 없는 오류"
+    }, 500);
+  }
+});
+
+// ─────────────────────────────────────
+// POST /api/harness  - 리서치 하네스 v5 (기존 유지)
+// ─────────────────────────────────────
 api.post("/harness", async (c) => {
   try {
     const body = await c.req.json();
-    const {
-      query,
-      apiKey,
-      anthropicKey = "",
-      projectId = "",
-      maxRetry = 3,
-      targetScore = 80
-    } = body;
+    const { query, apiKey, anthropicKey = "", projectId = "", maxRetry = 3, targetScore = 80 } = body;
 
     if (!query || !apiKey) {
       return c.json({ error: "query와 apiKey가 필요합니다" }, 400);
@@ -71,29 +115,21 @@ api.post("/harness", async (c) => {
     return new Response(
       new ReadableStream({
         async start(controller) {
-          const encoder = new TextEncoder();
-          const sendEvent = (event: string, data: unknown) => {
-            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-          };
+          const enc = new TextEncoder();
+          const send = (ev: string, data: unknown) =>
+            controller.enqueue(enc.encode(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`));
 
           try {
-            sendEvent("start", { message: "AI Harness v5 동적 워크플로우 시작", timestamp: new Date().toISOString() });
-
+            send("start", { message: "AI Harness v5 시작", timestamp: new Date().toISOString() });
             const result = await runHarness(
               query, apiKey,
-              (agentLog, retryEvent) => {
-                if (retryEvent) sendEvent("retry_event", retryEvent);
-                sendEvent("agent_complete", agentLog);
-              },
+              (log, retry) => { if (retry) send("retry_event", retry); send("agent_complete", log); },
               { projectId, maxRetry: safeMaxRetry, targetScore: safeTargetScore, anthropicKey },
-              (decisionEvent) => {
-                sendEvent(decisionEvent.type === "strategy" ? "strategy" : "decision", decisionEvent);
-              }
+              (ev) => send(ev.type === "strategy" ? "strategy" : "decision", ev)
             );
-
-            sendEvent("complete", result);
-          } catch (error) {
-            sendEvent("error", { message: error instanceof Error ? error.message : "알 수 없는 오류", timestamp: new Date().toISOString() });
+            send("complete", result);
+          } catch (err) {
+            send("error", { message: err instanceof Error ? err.message : "오류", timestamp: new Date().toISOString() });
           } finally {
             controller.close();
           }
@@ -101,144 +137,181 @@ api.post("/harness", async (c) => {
       }),
       { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" } }
     );
-  } catch (error) {
-    return c.json({ error: "요청 처리 실패", detail: error instanceof Error ? error.message : "알 수 없는 오류" }, 500);
+  } catch (err) {
+    return c.json({ error: "요청 처리 실패" }, 500);
   }
 });
 
-/**
- * POST /api/dev-harness - 개발 하네스 v6 (신규)
- *
- * SSE 이벤트:
- *   dev_start        - 하네스 시작
- *   dev_strategy     - Claude의 전체 개발 전략
- *   dev_decision     - Claude가 다음 팀원 결정
- *   dev_agent        - 팀원 작업 완료
- *   dev_complete     - 전체 완료 (최종 코드 + 결과)
- *   dev_error        - 오류 발생
- */
+// ─────────────────────────────────────
+// POST /api/dev-harness  - 개발 하네스 v6 (대형 프로젝트)
+//
+// SSE 이벤트:
+//   dev_start        - 시작
+//   dev_decompose    - TaskDecomposer 분해 결과
+//   dev_task_start   - 태스크 시작
+//   dev_decision     - Claude 결정
+//   dev_agent        - 에이전트 완료
+//   dev_task_done    - 태스크 완료 (성공/실패)
+//   dev_complete     - 전체 완료 + ZIP 다운로드 URL
+//   dev_error        - 오류
+// ─────────────────────────────────────
 api.post("/dev-harness", async (c) => {
   try {
     const body = await c.req.json();
-    const {
-      devRequest,   // 개발 요청 (예: "배열을 정렬하는 함수를 구현해줘")
-      apiKey,
-      anthropicKey = ""
-    } = body;
+    const { devRequest, apiKey, anthropicKey = "" } = body;
 
     if (!devRequest || !apiKey) {
       return c.json({ error: "devRequest와 apiKey가 필요합니다" }, 400);
     }
 
-    // 세션 ID 생성 (파일 공유용)
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
     return new Response(
       new ReadableStream({
         async start(controller) {
-          const encoder = new TextEncoder();
-          const sendEvent = (event: string, data: unknown) => {
-            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-          };
+          const enc = new TextEncoder();
+          const send = (ev: string, data: unknown) =>
+            controller.enqueue(enc.encode(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`));
 
           try {
-            sendEvent("dev_start", {
-              message: "🚀 개발 하네스 v6 시작",
+            send("dev_start", {
+              message: "🚀 개발 하네스 v6 시작 (대형 프로젝트 모드)",
               sessionId,
-              devRequest,
               timestamp: new Date().toISOString()
             });
 
-            // ── 1. Claude: 첫 번째 팀원 결정 ──
-            const initialPlan = await decideDevFirstStep(devRequest, anthropicKey);
-
-            sendEvent("dev_strategy", {
-              strategy: initialPlan.overallStrategy,
-              estimatedSteps: initialPlan.estimatedSteps,
-              techStack: initialPlan.techStack,
-              firstRole: initialPlan.firstStep.nextRole,
+            // ── 1. TaskDecomposer: 요청을 태스크로 분해 ──
+            send("dev_agent", {
+              devRole: "decomposer",
+              agentName: "🗂️ TaskDecomposer",
+              status: "running",
+              message: "개발 요청을 단위 태스크로 분해 중...",
+              stepCount: 0,
+              output: "",
+              toolCalls: [],
+              filesCreated: [],
               timestamp: new Date().toISOString()
             });
 
-            // ── 2. 동적 실행 루프 ──
-            const completedSteps: DevCompletedStep[] = [];
-            let currentStep = initialPlan.firstStep;
-            let stepCount = 0;
+            const plan = await decomposeProject(devRequest, anthropicKey, apiKey);
 
-            while (currentStep.nextRole !== "done" && stepCount < 10) {
-              stepCount++;
+            send("dev_decompose", {
+              projectName: plan.projectName,
+              totalTasks: plan.totalTasks,
+              tasks: plan.tasks,
+              techStack: plan.techStack,
+              entryFile: plan.entryFile,
+              notes: plan.notes,
+              sessionId
+            });
 
-              // Claude 결정 이벤트 전송
-              sendEvent("dev_decision", {
-                stepCount,
-                nextRole: currentStep.nextRole,
-                instruction: currentStep.instruction,
-                reasoning: currentStep.reasoning,
-                priority: currentStep.priority,
+            // ── 2. 태스크별 Developer → Reviewer 루프 ──
+            const allFiles: Set<string> = new Set();
+            const taskResults: { taskId: number; title: string; success: boolean; files: string[] }[] = [];
+            const completedContext: string[] = []; // 이전 태스크 결과 축적
+
+            for (const task of plan.tasks) {
+              send("dev_task_start", {
+                taskId: task.id,
+                title: task.title,
+                filename: task.filename,
+                totalTasks: plan.totalTasks,
                 timestamp: new Date().toISOString()
               });
 
-              // 팀원 실행 (이전 결과들을 컨텍스트로 제공)
-              const contextSummary = completedSteps
-                .map((s, i) => `[${i+1}. ${s.role}] ${s.output.slice(0, 500)}${s.output.length > 500 ? "...(생략)" : ""}`)
-                .join("\n\n---\n\n");
+              // 의존 파일 컨텍스트 구성 (이전 태스크에서 생성된 파일)
+              const depContext = task.dependsOn.length > 0
+                ? `\n\n[의존 파일 목록: ${task.dependsOn.join(", ")}]\n이 파일들이 이미 세션에 존재합니다. require('./파일명') 방식으로 불러오세요.`
+                : "";
 
-              const agentLog = await runDevAgent(
-                currentStep.nextRole as any,
-                currentStep.instruction,
+              const prevContext = completedContext.slice(-3).join("\n\n---\n\n"); // 최근 3개만
+
+              // Developer 실행
+              send("dev_decision", {
+                stepCount: task.id,
+                nextRole: "developer",
+                instruction: `"${task.filename}" 파일을 구현하세요.`,
+                reasoning: task.title,
+                priority: "normal",
+                timestamp: new Date().toISOString()
+              });
+
+              const devLog = await runDevAgent(
+                "developer",
+                `[태스크 ${task.id}/${plan.totalTasks}] ${task.title}\n\n${task.description}${depContext}\n\n파일명: ${task.filename}\n세션 ID: ${sessionId}`,
                 apiKey,
                 sessionId,
-                contextSummary
+                prevContext
               );
 
-              // 실행 성공 여부 파악 (코드 실행 결과에서)
-              const hasExecResult = agentLog.executionResults && agentLog.executionResults.length > 0;
-              const lastExec = hasExecResult ? agentLog.executionResults![agentLog.executionResults!.length - 1] : null;
+              send("dev_agent", { ...devLog, stepCount: task.id, sessionId });
 
-              sendEvent("dev_agent", {
-                ...agentLog,
-                stepCount,
-                sessionId
+              const devSuccess = devLog.executionResults?.some(r => r.success) ?? false;
+              devLog.filesCreated?.forEach(f => allFiles.add(f));
+
+              // Reviewer (실행 성공한 경우만)
+              if (devSuccess) {
+                send("dev_decision", {
+                  stepCount: task.id + 0.5,
+                  nextRole: "reviewer",
+                  instruction: `"${task.filename}" 코드를 검토하세요.`,
+                  reasoning: "실행 성공 → 품질 검토",
+                  priority: "normal",
+                  timestamp: new Date().toISOString()
+                });
+
+                const reviewLog = await runDevAgent(
+                  "reviewer",
+                  `[태스크 ${task.id} 리뷰] ${task.title}\n파일: ${task.filename}`,
+                  apiKey,
+                  sessionId,
+                  devLog.output?.slice(0, 800) || ""
+                );
+
+                send("dev_agent", { ...reviewLog, stepCount: task.id + 0.5, sessionId });
+              }
+
+              // 태스크 완료 기록
+              const taskSuccess = devSuccess;
+              taskResults.push({
+                taskId: task.id,
+                title: task.title,
+                success: taskSuccess,
+                files: devLog.filesCreated || []
               });
 
-              // 완료된 스텝 기록
-              completedSteps.push({
-                role: currentStep.nextRole as any,
-                output: agentLog.output || "",
-                filesCreated: agentLog.filesCreated || [],
-                executionSuccess: lastExec ? lastExec.success : undefined,
-                qualityScore: agentLog.qualityScore,
-                attempt: stepCount
-              });
-
-              // ── 3. Claude: 다음 팀원 결정 ──
-              currentStep = await decideDevNextStep(
-                devRequest,
-                anthropicKey,
-                completedSteps,
-                stepCount
+              // 다음 태스크를 위한 컨텍스트 추가
+              completedContext.push(
+                `[태스크 ${task.id}: ${task.title}] ${taskSuccess ? "✅ 성공" : "⚠️ 실패"}\n생성 파일: ${(devLog.filesCreated || []).join(", ")}\n결과 요약: ${(devLog.output || "").slice(0, 300)}`
               );
+
+              send("dev_task_done", {
+                taskId: task.id,
+                title: task.title,
+                success: taskSuccess,
+                files: devLog.filesCreated || [],
+                timestamp: new Date().toISOString()
+              });
             }
 
-            // ── 4. 최종 결과 ──
-            const finalFiles = completedSteps.flatMap(s => s.filesCreated);
-            const uniqueFiles = [...new Set(finalFiles)];
-            const lastQAScore = [...completedSteps].reverse().find(s => s.role === "qa_tester")?.qualityScore;
-            const lastReviewScore = [...completedSteps].reverse().find(s => s.role === "reviewer")?.qualityScore;
+            // ── 3. 완료 + 다운로드 URL ──
+            const successCount = taskResults.filter(t => t.success).length;
+            const downloadUrl = `/api/download/${sessionId}?name=${encodeURIComponent(plan.projectName)}`;
 
-            sendEvent("dev_complete", {
+            send("dev_complete", {
               sessionId,
-              totalSteps: stepCount,
-              filesCreated: uniqueFiles,
-              completedRoles: completedSteps.map(s => s.role),
-              qualityScore: lastQAScore || lastReviewScore || null,
-              summary: `${stepCount}단계 완료 | 파일 ${uniqueFiles.length}개 생성`,
+              projectName: plan.projectName,
+              totalTasks: plan.totalTasks,
+              successTasks: successCount,
+              filesCreated: [...allFiles],
+              downloadUrl,
+              summary: `${successCount}/${plan.totalTasks} 태스크 완료 · 파일 ${allFiles.size}개 생성`,
               timestamp: new Date().toISOString()
             });
 
-          } catch (error) {
-            sendEvent("dev_error", {
-              message: error instanceof Error ? error.message : "알 수 없는 오류",
+          } catch (err) {
+            send("dev_error", {
+              message: err instanceof Error ? err.message : "알 수 없는 오류",
               timestamp: new Date().toISOString()
             });
           } finally {
@@ -255,12 +328,8 @@ api.post("/dev-harness", async (c) => {
         }
       }
     );
-
-  } catch (error) {
-    return c.json({
-      error: "개발 하네스 요청 처리 실패",
-      detail: error instanceof Error ? error.message : "알 수 없는 오류"
-    }, 500);
+  } catch (err) {
+    return c.json({ error: "개발 하네스 요청 처리 실패" }, 500);
   }
 });
 
