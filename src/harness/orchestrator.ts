@@ -1,30 +1,37 @@
 /**
- * AI Harness 오케스트레이터 v4 - Claude AI 오케스트레이터
+ * AI Harness 오케스트레이터 v5 - 완전 동적 워크플로우
  *
- * v3(코드 오케스트레이터)와의 핵심 차이:
+ * v4 → v5 핵심 변화:
  *
- *   v3: TypeScript 코드가 순서 결정 (항상 Researcher→Analyst→Critic→Synthesizer)
- *   v4: Claude가 쿼리를 분석하여 실행 계획 동적 생성
- *       + 중간 검토(각 에이전트 완료 후 계획 수정 가능)
+ *   v4: Claude가 시작 시 steps[] 배열 생성 → 순서대로 실행 (반정적)
+ *   v5: Claude가 매 에이전트 완료 후 "다음에 뭘 할지" 실시간 결정 (완전 동적)
  *
- * 전체 흐름:
+ * v5 실행 루프:
  *
- *  [1] Claude가 계획 수립
- *       → 쿼리 분석 후 에이전트 순서/지시 결정
- *       예) ["researcher", "researcher", "analyst", "critic(판정)", "synthesizer"]
+ *  ┌─────────────────────────────────────────────────┐
+ *  │  [시작] Claude가 첫 번째 에이전트 결정            │
+ *  │         ↓                                       │
+ *  │  [실행] 결정된 에이전트 실행                      │
+ *  │         ↓                                       │
+ *  │  [재판단] Claude가 결과 보고 "다음에 뭘 할지" 결정 │
+ *  │         ↓                                        │
+ *  │  synthesizer 결정 → 최종 보고서 → 종료            │
+ *  └─────────────────────────────────────────────────┘
  *
- *  [2] 계획대로 에이전트 순서 실행
- *       → 각 에이전트는 여전히 GPT-4o-mini
- *       → critic isJudge=true 이면 피드백 루프 진입
- *
- *  [3] Claude 중간 검토 (옵션)
- *       → 2개 이상 완료 시마다 "계획 변경 필요?" 재판단
- *
- *  [4] 최종 보고서 + 리포트
+ * 진짜 동적인 이유:
+ *   - Researcher 결과가 풍부 → Claude: "Analyst 없이 바로 Critic"
+ *   - Researcher 결과가 빈약 → Claude: "Researcher 한번 더, 다른 각도로"
+ *   - Critic 점수 낮음 → Claude: "Analyst 한번 더 필요해"
+ *   - 단순 질문 → Claude: "Researcher만으로 충분해, 바로 Synthesizer"
  */
 
 import { runAgent, runCriticJudgement } from "./agent.js";
-import { planWithClaude, reviewWithClaude } from "./claude-orchestrator.js";
+import {
+  decideFirstStep,
+  decideNextStep,
+  getDefaultInitialPlan,
+  getDefaultNextStep
+} from "./claude-orchestrator.js";
 import type {
   HarnessResult,
   AgentLog,
@@ -32,13 +39,28 @@ import type {
   RetryReport,
   CriticJudgement
 } from "./types.js";
-import type { OrchestratorPlan, AgentStep } from "./claude-orchestrator.js";
+import type { AgentResult, NextStepDecision } from "./claude-orchestrator.js";
 
 export interface HarnessConfig {
   maxRetry: number;
   targetScore: number;
   projectId: string;
-  anthropicKey: string;   // Claude 오케스트레이터용 (없으면 코드 오케스트레이터로 폴백)
+  anthropicKey: string;
+}
+
+// v5에서 Claude가 각 결정을 내릴 때 SSE로 전송할 이벤트
+export interface DecisionEvent {
+  type: "decision";
+  stepNumber: number;
+  decision: NextStepDecision;
+  completedCount: number;
+}
+
+export interface StrategyEvent {
+  type: "strategy";
+  overallStrategy: string;
+  estimatedComplexity: "low" | "medium" | "high";
+  firstRole: string;
 }
 
 const DEFAULT_CONFIG: HarnessConfig = {
@@ -48,154 +70,166 @@ const DEFAULT_CONFIG: HarnessConfig = {
   anthropicKey: ""
 };
 
-const ABSOLUTE_MAX = 10;
-
-// 계획 정보도 SSE로 전송하기 위한 이벤트 타입
-export interface PlanEvent {
-  type: "plan";
-  plan: OrchestratorPlan;
-}
-export interface ReviewEvent {
-  type: "review";
-  comment: string;
-  modified: boolean;
-}
+const ABSOLUTE_MAX_RETRIES = 10;
+const ABSOLUTE_MAX_STEPS = 8;
 
 export async function runHarness(
   query: string,
   apiKey: string,
   onAgentUpdate?: (log: AgentLog, event?: RetryEvent) => void,
   config: Partial<HarnessConfig> = {},
-  onPlanUpdate?: (event: PlanEvent | ReviewEvent) => void
+  onDecisionUpdate?: (event: DecisionEvent | StrategyEvent) => void
 ): Promise<HarnessResult> {
 
   const cfg: HarnessConfig = { ...DEFAULT_CONFIG, ...config };
-  const effectiveMax = cfg.maxRetry === 0 ? ABSOLUTE_MAX : cfg.maxRetry;
+  const effectiveMaxRetry = cfg.maxRetry === 0 ? ABSOLUTE_MAX_RETRIES : cfg.maxRetry;
+  const useClaudeOrchestrator = !!cfg.anthropicKey;
 
-  const startTime     = Date.now();
-  const allLogs:       AgentLog[]    = [];
-  const mcpToolsUsed:  string[]      = [];
-  const retryEvents:   RetryEvent[]  = [];
+  const startTime = Date.now();
+  const allLogs: AgentLog[] = [];
+  const mcpToolsUsed: string[] = [];
+  const retryEvents: RetryEvent[] = [];
   const qualityProgression: number[] = [];
+
+  // 완료된 에이전트 결과 축적 (Claude에게 전달)
+  const completedResults: AgentResult[] = [];
+
+  let lastCriticScore: number | null = null;
+  let forcedStop = false;
+  let stepCount = 0;
+
+  // 재시도 관련 상태
+  let judgeAttempt = 0;
+  let judgeApproved = false;
+  let previousFeedback = "";
 
   const collectTools = (log: AgentLog) => {
     log.toolCalls?.forEach(tc => {
       if (!mcpToolsUsed.includes(tc.toolName)) mcpToolsUsed.push(tc.toolName);
     });
   };
-  const trimContext = (text: string, maxLen = 1500) =>
+
+  const trimText = (text: string, maxLen = 1500) =>
     text.length > maxLen ? text.slice(0, maxLen) + "\n...(이하 생략)" : text;
 
-  // ───────────────────────────────────────────
-  // STEP 1: Claude가 실행 계획 수립
-  // ───────────────────────────────────────────
-  let plan: OrchestratorPlan;
-  const useClaudeOrchestrator = !!cfg.anthropicKey;
+  console.log("\n========== AI Harness v5 시작 (완전 동적) ==========");
+  console.log(`쿼리: ${query}`);
+  console.log(`오케스트레이터: ${useClaudeOrchestrator ? "Claude claude-3-5-haiku (동적)" : "기본(코드)"}`);
+  console.log(`최대 재시도: ${cfg.maxRetry === 0 ? `무제한(안전장치 ${ABSOLUTE_MAX_RETRIES}회)` : cfg.maxRetry + "회"}`);
+  console.log(`목표 점수: ${cfg.targetScore}점`);
+  console.log("======================================================\n");
 
+  // ──────────────────────────────────────────────────────────
+  // STEP 1: Claude가 첫 번째 에이전트 결정
+  // ──────────────────────────────────────────────────────────
+  let initialPlan;
   if (useClaudeOrchestrator) {
-    console.log("\n🤖 [Claude 오케스트레이터] 실행 계획 수립 중...");
-    plan = await planWithClaude(query, cfg.anthropicKey, cfg.targetScore);
-    console.log(`📋 계획: ${plan.steps.map(s => s.role + (s.isJudge ? "(판정)" : "")).join(" → ")}`);
-    console.log(`💭 이유: ${plan.reasoning}`);
-    onPlanUpdate?.({ type: "plan", plan });
+    console.log("🧠 [Claude] 첫 번째 에이전트 결정 중...");
+    initialPlan = await decideFirstStep(query, cfg.anthropicKey, cfg.targetScore);
   } else {
-    // Anthropic 키 없으면 기본 계획으로 폴백
-    console.log("\n⚠️ Anthropic 키 없음 → 기본 계획으로 실행");
-    plan = {
-      reasoning: "Anthropic API 키가 입력되지 않아 기본 계획으로 실행합니다.",
-      estimatedComplexity: "medium",
-      steps: [
-        { role: "researcher",  instruction: "주제에 대한 최신 정보를 수집하세요.", isJudge: false },
-        { role: "analyst",     instruction: "수집된 정보를 심층 분석하세요.",      isJudge: false },
-        { role: "critic",      instruction: "분석 내용을 검증하고 판정하세요.",     isJudge: true  },
-        { role: "synthesizer", instruction: "최종 보고서를 작성하세요.",            isJudge: false }
-      ]
-    };
-    onPlanUpdate?.({ type: "plan", plan });
+    initialPlan = getDefaultInitialPlan();
   }
 
-  console.log("\n========== AI Harness v4 시작 ==========");
-  console.log(`쿼리: ${query}`);
-  console.log(`오케스트레이터: ${useClaudeOrchestrator ? "Claude claude-3-5-haiku" : "기본(코드)"}`);
-  console.log(`최대 재시도: ${cfg.maxRetry === 0 ? `무제한(안전장치 ${ABSOLUTE_MAX}회)` : cfg.maxRetry + "회"}`);
-  console.log(`목표 점수: ${cfg.targetScore}점`);
-  console.log("=========================================\n");
+  console.log(`📋 전체 전략: ${initialPlan.overallStrategy}`);
+  console.log(`🎯 첫 번째: ${initialPlan.firstStep.nextRole} (이유: ${initialPlan.firstStep.reasoning})`);
 
-  // ───────────────────────────────────────────
-  // STEP 2: 계획대로 에이전트 실행
-  // ───────────────────────────────────────────
-  let contextAccumulator = "";   // 이전 에이전트 출력 누적
-  const completedSteps: { role: string; output: string }[] = [];
-  let lastJudgement: CriticJudgement | null = null;
-  let forcedStop = false;
+  onDecisionUpdate?.({
+    type: "strategy",
+    overallStrategy: initialPlan.overallStrategy,
+    estimatedComplexity: initialPlan.estimatedComplexity,
+    firstRole: initialPlan.firstStep.nextRole
+  });
 
-  // critic(isJudge=true) 전용 재시도 루프 상태
-  let judgeAttempt = 0;
-  let judgeApproved = false;
-  let previousFeedback = "";
+  // 첫 번째 결정도 decision 이벤트로 전송
+  onDecisionUpdate?.({
+    type: "decision",
+    stepNumber: 1,
+    decision: initialPlan.firstStep,
+    completedCount: 0
+  });
 
-  // plan.steps를 순서대로 실행
-  // critic isJudge=true 구간은 내부적으로 피드백 루프
-  let stepIndex = 0;
-  const steps = [...plan.steps];
+  // ──────────────────────────────────────────────────────────
+  // STEP 2: 동적 실행 루프
+  // ──────────────────────────────────────────────────────────
+  let currentDecision = initialPlan.firstStep;
 
-  while (stepIndex < steps.length) {
-    const step = steps[stepIndex];
+  while (currentDecision.nextRole !== "synthesizer" && currentDecision.nextRole !== "done") {
+    stepCount++;
 
-    // ── critic 판정 모드: 피드백 루프 ──
-    if (step.role === "critic" && step.isJudge) {
+    // critic + isJudge 모드: 피드백 루프
+    if (currentDecision.role === "critic" && currentDecision.isJudge ||
+        currentDecision.nextRole === "critic" && currentDecision.isJudge) {
+
       judgeAttempt = 0;
       judgeApproved = false;
       previousFeedback = "";
 
-      // 직전 researcher/analyst 로그 찾기
       const researchLogs = allLogs.filter(l => l.agentRole === "researcher");
       const analysisLogs = allLogs.filter(l => l.agentRole === "analyst");
       let lastResearch = researchLogs[researchLogs.length - 1];
       let lastAnalysis = analysisLogs[analysisLogs.length - 1];
 
-      while (!judgeApproved && judgeAttempt < effectiveMax) {
+      while (!judgeApproved && judgeAttempt < effectiveMaxRetry) {
         judgeAttempt++;
 
-        // 재시도 시 Researcher 재실행
         if (judgeAttempt > 1) {
           console.log(`🔄 [${judgeAttempt}차 재시도] Researcher 재실행...`);
-          const retryResearch = await runAgent(
-            "researcher",
-            `다음 주제에 대해 리서치하세요: "${query}"
-${previousFeedback ? `\n[이전 반려 피드백 - 반드시 반영]\n${previousFeedback}` : ""}`,
-            apiKey, "", cfg.projectId
-          );
+          const retryMsg = `다음 주제에 대해 리서치하세요: "${query}"${previousFeedback ? `\n\n[이전 반려 피드백 - 반드시 반영]\n${previousFeedback}` : ""}`;
+
+          const retryResearch = await runAgent("researcher", retryMsg, apiKey, "", cfg.projectId);
           retryResearch.attempt = judgeAttempt;
           allLogs.push(retryResearch);
           collectTools(retryResearch);
           onAgentUpdate?.(retryResearch);
           lastResearch = retryResearch;
+          completedResults.push({
+            role: "researcher",
+            output: retryResearch.output || "",
+            toolsUsed: retryResearch.toolCalls?.map(t => t.toolName) || [],
+            attempt: judgeAttempt
+          });
 
-          // Analyst도 재실행
-          const retryAnalysis = await runAgent(
-            "analyst",
-            step.instruction || "리서치 결과를 심층 분석하세요.",
-            apiKey, trimContext(retryResearch.output || ""), cfg.projectId
-          );
-          retryAnalysis.attempt = judgeAttempt;
-          allLogs.push(retryAnalysis);
-          collectTools(retryAnalysis);
-          onAgentUpdate?.(retryAnalysis);
-          lastAnalysis = retryAnalysis;
+          // Analyst도 재실행 (있을 때만)
+          if (lastAnalysis) {
+            const retryAnalysis = await runAgent(
+              "analyst",
+              currentDecision.instruction || "리서치 결과를 심층 분석하세요.",
+              apiKey,
+              trimText(retryResearch.output || ""),
+              cfg.projectId
+            );
+            retryAnalysis.attempt = judgeAttempt;
+            allLogs.push(retryAnalysis);
+            collectTools(retryAnalysis);
+            onAgentUpdate?.(retryAnalysis);
+            lastAnalysis = retryAnalysis;
+            completedResults.push({
+              role: "analyst",
+              output: retryAnalysis.output || "",
+              toolsUsed: retryAnalysis.toolCalls?.map(t => t.toolName) || [],
+              attempt: judgeAttempt
+            });
+          }
         }
 
-        // Critic 판정 실행
+        // Critic 판정
         const { log: criticLog, judgement } = await runCriticJudgement(
-          trimContext(lastResearch?.output || "", 800),
-          trimContext(lastAnalysis?.output || "", 800),
+          trimText(lastResearch?.output || "", 800),
+          trimText(lastAnalysis?.output || "", 800),
           query, apiKey, cfg.projectId, judgeAttempt, cfg.targetScore
         );
         criticLog.attempt = judgeAttempt;
         allLogs.push(criticLog);
         collectTools(criticLog);
         qualityProgression.push(judgement.score);
-        lastJudgement = judgement;
+        lastCriticScore = judgement.score;
+
+        completedResults.push({
+          role: "critic",
+          output: criticLog.output || "",
+          toolsUsed: criticLog.toolCalls?.map(t => t.toolName) || [],
+          attempt: judgeAttempt
+        });
 
         if (judgement.score >= cfg.targetScore) {
           judgeApproved = true;
@@ -213,7 +247,7 @@ ${previousFeedback ? `\n[이전 반려 피드백 - 반드시 반영]\n${previous
           previousFeedback = `반려 이유: ${judgement.reason}\n현재 점수: ${judgement.score}점 (목표: ${cfg.targetScore}점)\n문제점:\n${judgement.issues.map((i, idx) => `  ${idx+1}. ${i}`).join("\n")}\n개선 제안:\n${judgement.suggestions.map((s, idx) => `  ${idx+1}. ${s}`).join("\n")}`;
           console.log(`❌ ${judgeAttempt}차 반려 (${judgement.score}점)`);
 
-          if (judgeAttempt >= effectiveMax) {
+          if (judgeAttempt >= effectiveMaxRetry) {
             forcedStop = true;
             judgeApproved = true;
             console.log(`⚠️ 최대 재시도 소진 → 강제 진행`);
@@ -224,57 +258,90 @@ ${previousFeedback ? `\n[이전 반려 피드백 - 반드시 반영]\n${previous
         }
       }
 
-      // 컨텍스트 업데이트
-      const latestCritic = allLogs.filter(l => l.agentRole === "critic").slice(-1)[0];
-      contextAccumulator += `\n[검증/비평]\n${trimContext(latestCritic?.output || "", 500)}`;
-      completedSteps.push({ role: "critic", output: latestCritic?.output || "" });
-      stepIndex++;
-
     } else {
-      // ── 일반 에이전트 실행 ──
-      console.log(`▶ [Step ${stepIndex + 1}/${steps.length}] ${step.role} 실행 중...`);
+      // 일반 에이전트 실행
+      console.log(`▶ [Step ${stepCount}] ${currentDecision.nextRole} 실행 중...`);
+      console.log(`  지시: ${currentDecision.instruction}`);
+
+      // researcher는 이전 컨텍스트 없이, 나머지는 이전 결과 전달
+      const context = currentDecision.nextRole === "researcher"
+        ? (previousFeedback ? `[이전 반려 피드백]\n${previousFeedback}` : "")
+        : trimText(completedResults.map(r => `[${r.role}]\n${r.output}`).join("\n\n"));
 
       const agentLog = await runAgent(
-        step.role as any,
-        step.instruction || query,
+        currentDecision.nextRole as any,
+        currentDecision.instruction || query,
         apiKey,
-        step.role === "researcher" ? "" : trimContext(contextAccumulator),
+        context,
         cfg.projectId
       );
+
       allLogs.push(agentLog);
       collectTools(agentLog);
       onAgentUpdate?.(agentLog);
 
-      contextAccumulator += `\n[${step.role}]\n${trimContext(agentLog.output || "", 500)}`;
-      completedSteps.push({ role: step.role, output: agentLog.output || "" });
-      stepIndex++;
-
-      // ── Claude 중간 검토 (synthesizer 직전, Anthropic 키 있을 때만) ──
-      if (
-        useClaudeOrchestrator &&
-        stepIndex < steps.length &&
-        steps[stepIndex]?.role !== "synthesizer" &&
-        completedSteps.length >= 2
-      ) {
-        const remaining = steps.slice(stepIndex);
-        const review = await reviewWithClaude(
-          query, cfg.anthropicKey, completedSteps, remaining, cfg.targetScore
-        );
-        console.log(`🔍 [Claude 중간 검토] ${review.comment}`);
-        if (review.modifiedSteps) {
-          steps.splice(stepIndex, steps.length - stepIndex, ...review.modifiedSteps);
-          console.log(`📝 계획 수정: ${review.modifiedSteps.map(s => s.role).join(" → ")}`);
-        }
-        onPlanUpdate?.({ type: "review", comment: review.comment, modified: !!review.modifiedSteps });
-      }
+      completedResults.push({
+        role: currentDecision.nextRole,
+        output: agentLog.output || "",
+        toolsUsed: agentLog.toolCalls?.map(t => t.toolName) || [],
+        attempt: 1
+      });
     }
+
+    // ──────────────────────────────────────────────────────────
+    // STEP 3: Claude가 다음 에이전트 결정 (v5의 핵심!)
+    // ──────────────────────────────────────────────────────────
+    if (useClaudeOrchestrator) {
+      console.log(`\n🧠 [Claude] Step ${stepCount} 완료 → 다음 에이전트 결정 중...`);
+      currentDecision = await decideNextStep(
+        query,
+        cfg.anthropicKey,
+        completedResults,
+        cfg.targetScore,
+        lastCriticScore,
+        stepCount
+      );
+    } else {
+      currentDecision = getDefaultNextStep(completedResults, lastCriticScore, cfg.targetScore);
+    }
+
+    console.log(`  → 다음: ${currentDecision.nextRole} (이유: ${currentDecision.reasoning})`);
+
+    onDecisionUpdate?.({
+      type: "decision",
+      stepNumber: stepCount + 1,
+      decision: currentDecision,
+      completedCount: completedResults.length
+    });
   }
 
-  // ───────────────────────────────────────────
-  // STEP 3: 리포트 생성
-  // ───────────────────────────────────────────
-  const synthLog = allLogs.filter(l => l.agentRole === "synthesizer").slice(-1)[0];
+  // ──────────────────────────────────────────────────────────
+  // STEP 4: Synthesizer - 최종 보고서 작성
+  // ──────────────────────────────────────────────────────────
+  console.log(`\n✨ [Synthesizer] 최종 보고서 작성 중...`);
+  const synthContext = trimText(
+    completedResults.map(r => `[${r.role}${r.attempt > 1 ? ` (${r.attempt}차)` : ""}]\n${r.output}`).join("\n\n"),
+    3000
+  );
 
+  const forcedNote = forcedStop
+    ? `\n⚠️ 주의: 목표 점수(${cfg.targetScore}점)에 도달하지 못한 채 강제 종료된 결과입니다.`
+    : "";
+
+  const synthLog = await runAgent(
+    "synthesizer",
+    `다음 모든 에이전트 결과를 종합하여 최종 보고서를 작성하세요.\n원본 쿼리: ${query}${forcedNote}`,
+    apiKey,
+    synthContext,
+    cfg.projectId
+  );
+  allLogs.push(synthLog);
+  collectTools(synthLog);
+  onAgentUpdate?.(synthLog);
+
+  // ──────────────────────────────────────────────────────────
+  // STEP 5: 리포트 생성
+  // ──────────────────────────────────────────────────────────
   const retryReport: RetryReport = {
     totalAttempts: judgeAttempt || 1,
     totalRejections: retryEvents.length,
@@ -289,8 +356,8 @@ ${previousFeedback ? `\n[이전 반려 피드백 - 반드시 반영]\n${previous
 
   const totalDuration = Date.now() - startTime;
 
-  console.log("\n========== AI Harness v4 완료 ==========");
-  console.log(`총 소요: ${(totalDuration / 1000).toFixed(1)}s | 에이전트: ${allLogs.length}개 | 반려: ${retryEvents.length}회`);
+  console.log("\n========== AI Harness v5 완료 ==========");
+  console.log(`총 소요: ${(totalDuration / 1000).toFixed(1)}s | 에이전트: ${allLogs.length}개 | 스텝: ${stepCount}개 | 반려: ${retryEvents.length}회`);
   console.log("=========================================\n");
 
   return {
@@ -320,7 +387,7 @@ function generateImprovementSummary(
   const improvement = lastScore - firstScore;
   const trendIcon = improvement > 0 ? "📈" : improvement < 0 ? "📉" : "➡️";
   const allIssues = [...new Set(retryEvents.flatMap(e => e.judgement.issues))];
-  const limitInfo = maxRetry === 0 ? `안전장치(${ABSOLUTE_MAX}회)` : `최대 ${maxRetry}회`;
+  const limitInfo = maxRetry === 0 ? `안전장치(${ABSOLUTE_MAX_RETRIES}회)` : `최대 ${maxRetry}회`;
   const resultLine = forcedStop
     ? `⚠️ ${totalAttempts}차 모두 반려 (${limitInfo} 소진) → 강제 종료`
     : `✅ ${totalAttempts}차 시도 끝에 최종 승인 (${lastScore}점 ≥ 목표 ${targetScore}점)`;
