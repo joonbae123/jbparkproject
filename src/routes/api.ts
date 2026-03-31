@@ -58,7 +58,7 @@ api.get("/tools", (c) => {
 api.post("/harness", async (c) => {
   try {
     const body = await c.req.json();
-    const { query, apiKey, projectId = "", maxRetry = 3, targetScore = 80 } = body;
+    const { query, apiKey, anthropicKey = "", projectId = "", maxRetry = 3, targetScore = 80 } = body;
     
     if (!query || !apiKey) {
       return c.json({ error: "query와 apiKey가 필요합니다" }, 400);
@@ -93,12 +93,11 @@ api.post("/harness", async (c) => {
               query,
               apiKey,
               (agentLog, retryEvent) => {
-                if (retryEvent) {
-                  sendEvent("retry_event", retryEvent);
-                }
+                if (retryEvent) sendEvent("retry_event", retryEvent);
                 sendEvent("agent_complete", agentLog);
               },
-              { projectId: projectId, maxRetry: safeMaxRetry, targetScore: safeTargetScore }
+              { projectId, maxRetry: safeMaxRetry, targetScore: safeTargetScore, anthropicKey },
+              (planEvent) => sendEvent("plan_update", planEvent)
             );
             
             // 최종 완료 이벤트
