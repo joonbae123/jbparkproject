@@ -494,3 +494,112 @@ Claude Haiku (오케)      →   Claude Sonnet으로 판단 강화
 
 *작성일: 2026-03-31*  
 *데모 앱: https://github.com/joonbae123/jbparkproject*
+
+---
+
+## v6 하네스 - 개발 자동화 파이프라인 (신규)
+
+### 핵심 아이디어
+
+> "AI들이 스스로 코드를 짜고, 실행하고, 오류나면 고치는 하네스"
+
+v1~v5는 **정보를 수집·분석**하는 리서치 파이프라인이었습니다.  
+v6은 **실제 코드를 작성하고 Node.js로 직접 실행**하는 개발 파이프라인입니다.
+
+### v5 리서치 하네스 vs v6 개발 하네스
+
+```
+v5 (정보 분석 파이프라인)       v6 (코드 개발 파이프라인)
+────────────────────────────    ────────────────────────────────
+Researcher  → 정보 수집         PM          → 요구사항 분석, 명세서
+Analyst     → 텍스트 분석       Developer   → 코드 작성 + 실행 검증
+Critic      → 품질 검증         Reviewer    → 코드 품질 점수 평가
+Synthesizer → 보고서 작성       QA Tester   → 테스트 코드 작성·실행
+
+"AI 판단" 피드백          →   "실행 결과(stdout/stderr)" 피드백
+주관적 점수 (0~100)       →   객관적 결과 (통과/실패, 에러 메시지)
+```
+
+### 핵심: 실제 코드 실행 (child_process)
+
+```typescript
+// dev-tools.ts - execute_code 도구
+const stdout = execSync(`node "${filePath}"`, {
+  timeout: 10000,        // 10초 타임아웃
+  cwd: sessionPath,
+  encoding: "utf-8"
+});
+// stdout/stderr/exitCode가 그대로 AI에게 피드백됨
+```
+
+에이전트가 코드를 작성하면 **즉시 Node.js로 실행**합니다.  
+에러가 나면 에러 메시지 그대로 다음 AI의 컨텍스트로 들어갑니다.
+
+### v6 실행 흐름
+
+```
+[개발 요청 접수]
+"버블 정렬 함수를 만들어줘. 오름차순/내림차순 옵션 포함."
+     ↓
+[Claude 초기 결정] "PM → Developer → Reviewer → QA 순으로"
+     ↓
+[PM] 명세서 작성: 파일 구조, 함수 시그니처, 테스트 케이스 목록
+     ↓
+[Developer] write_code → execute_code → 에러면 수정 반복
+     ↓ (실행 성공)
+[Reviewer] read_code → 품질 점수 (정확성/가독성/에러처리/효율성)
+     ↓ (점수 70+ 이면)
+[QA Tester] write_code(테스트) → run_tests → 통과/실패
+     ↓
+[Claude 판단] "모두 통과 → done"
+```
+
+### 새로 추가된 MCP 도구 (5가지)
+
+| 도구 | 역할 | 실제 동작 |
+|------|------|-----------|
+| `write_code` | 코드 파일 작성 | `fs.writeFileSync()` |
+| `read_code` | 코드 파일 읽기 | `fs.readFileSync()` |
+| `execute_code` | **코드 실행** | `child_process.execSync()` |
+| `run_tests` | 테스트 실행 | Node.js로 `*.test.js` 실행 |
+| `list_files` | 파일 목록 | `fs.readdirSync()` |
+
+### 격리 실행 환경 (샌드박스)
+
+```
+/tmp/dev-harness/
+└── session-1711929074-abc12/    ← 세션별 격리 디렉토리
+    ├── solution.js               ← Developer가 작성
+    └── solution.test.js          ← QA Tester가 작성
+```
+
+- 각 하네스 실행마다 고유 세션 ID 생성
+- 파일은 세션 디렉토리에 격리 → 동시 실행 충돌 없음
+- Path traversal 방지: `path.basename()` 강제
+
+### 정량적 피드백의 의미
+
+```
+v5 Critic 피드백 (주관적):
+  "점수: 72점 - 출처 불충분, 분석 깊이 부족"
+  → 개선 기준이 모호
+
+v6 QA 피드백 (객관적):
+  "실행 결과: exit code 1
+   Error: Cannot read properties of undefined (reading 'length')
+   at line 23: arr.length"
+  → 정확히 어디가 잘못됐는지 명확
+```
+
+**실행 결과 = 재시도의 근거** → 할루시네이션 없는 피드백
+
+### 버전 비교 테이블
+
+| 구분 | v1 | v2 | v3 | v4 | v5 | v6 |
+|------|----|----|----|----|----|----|
+| 오케스트레이터 | 코드 고정 | 코드 고정 | Claude (1회) | Claude (1회) | Claude (매 단계) | Claude (매 단계) |
+| 피드백 루프 | ❌ | Critic→Researcher | ✅ | ✅ | ✅ | ✅ |
+| 파이프라인 | 리서치 | 리서치 | 리서치 | 리서치 | 리서치 | **개발** |
+| 코드 실행 | ❌ | ❌ | ❌ | ❌ | ❌ | **✅ Node.js** |
+| 피드백 유형 | - | 주관적 | 주관적 | 주관적 | 주관적 | **객관적 (stdout)** |
+| 파일 I/O | ❌ | ❌ | ❌ | ❌ | ❌ | **✅ 실제 파일** |

@@ -157,7 +157,7 @@ export async function runHarness(
     stepCount++;
 
     // critic + isJudge 모드: 피드백 루프
-    if (currentDecision.role === "critic" && currentDecision.isJudge ||
+    if (currentDecision.nextRole === "critic" && currentDecision.isJudge ||
         currentDecision.nextRole === "critic" && currentDecision.isJudge) {
 
       judgeAttempt = 0;
