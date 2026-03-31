@@ -19,9 +19,45 @@
  *   최종 텍스트 응답 반환
  */
 
-import OpenAI from "openai";
 import { MCP_TOOLS, convertToOpenAITools, executeMCPTool } from "../mcp/tools.js";
-import type { AgentLog, AgentRole } from "./types.js";
+import type { AgentLog, AgentRole, CriticJudgement } from "./types.js";
+
+// OpenAI API를 SDK 없이 직접 fetch로 호출
+// SDK의 no body 버그 우회
+async function callOpenAI(
+  apiKey: string,
+  projectId: string,
+  body: Record<string, unknown>
+): Promise<any> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`,
+  };
+  if (projectId) headers["OpenAI-Project"] = projectId;
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    let errMsg = `HTTP ${res.status}`;
+    try {
+      if (text && text.length > 0) {
+        const errJson = JSON.parse(text);
+        errMsg = errJson.error?.message || errMsg;
+      } else {
+        errMsg = `HTTP ${res.status} (응답 없음) - API Key를 확인하세요`;
+      }
+    } catch {
+      errMsg = text ? `HTTP ${res.status}: ${text.slice(0, 200)}` : `HTTP ${res.status} (빈 응답)`;
+    }
+    throw new Error(errMsg);
+  }
+  return JSON.parse(text);
+}
 
 // Agent 설정 정의
 // 각 Agent는 자신만의 역할과 성격을 가집니다
@@ -83,7 +119,8 @@ export async function runAgent(
   role: AgentRole,
   userMessage: string,
   apiKey: string,
-  previousContext: string = ""
+  previousContext: string = "",
+  projectId: string = ""
 ): Promise<AgentLog> {
   
   const config = AGENT_CONFIGS[role];
@@ -101,108 +138,269 @@ export async function runAgent(
   };
 
   try {
-    const openai = new OpenAI({ apiKey });
-    
     // MCP Tools 중 이 에이전트가 사용할 수 있는 것만 필터링
-    // 각 에이전트는 자신의 역할에 맞는 도구만 사용 가능
     const availableTools = MCP_TOOLS.filter(
       tool => config.allowedTools.includes(tool.name)
     );
-    
-    // OpenAI 형식으로 변환
     const openAITools = convertToOpenAITools(availableTools);
-    
+
     // 메시지 구성
-    // - system: 에이전트의 역할/성격 정의
-    // - user: 처리할 작업 (이전 컨텍스트 포함)
-    const messages: OpenAI.ChatCompletionMessageParam[] = [
+    const messages: any[] = [
       { role: "system", content: config.systemPrompt },
       {
         role: "user",
-        content: previousContext 
+        content: previousContext
           ? `[이전 에이전트 작업 결과]\n${previousContext}\n\n[현재 작업]\n${userMessage}`
           : userMessage
       }
     ];
 
     // ===== 핵심: Tool Calling 루프 =====
-    // AI가 "더 이상 도구가 필요없다"고 판단할 때까지 반복
     let iteration = 0;
-    const maxIterations = 3; // 무한 루프 방지
-    
+    const maxIterations = 3;
+
     while (iteration < maxIterations) {
       iteration++;
       log.status = "running";
-      
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",  // 비용 효율적인 모델 사용
+
+      // SDK 대신 fetch 직접 호출 (no body 버그 우회)
+      const response = await callOpenAI(apiKey, projectId, {
+        model: "gpt-4o-mini",
         messages,
-        tools: openAITools.length > 0 ? openAITools : undefined,
-        tool_choice: openAITools.length > 0 ? "auto" : undefined, // AI가 자율적으로 도구 사용 결정
-        max_tokens: 1000,
+        ...(openAITools.length > 0 ? { tools: openAITools, tool_choice: "auto" } : {}),
+        max_tokens: 2000,
         temperature: 0.7
       });
 
       const choice = response.choices[0];
-      
+
       // 케이스 1: AI가 도구 호출을 결정한 경우
       if (choice.finish_reason === "tool_calls" && choice.message.tool_calls) {
         log.status = "tool_calling";
-        
-        // 어시스턴트 메시지를 컨텍스트에 추가
         messages.push(choice.message);
-        
-        // 각 Tool 호출 처리
+
         for (const toolCall of choice.message.tool_calls) {
           const toolName = toolCall.function.name;
           const toolArgs = JSON.parse(toolCall.function.arguments);
-          
+
           console.log(`[${config.name}] MCP Tool 호출: ${toolName}`, toolArgs);
-          
-          // MCP Tool 실제 실행
           const toolResult = await executeMCPTool(toolName, toolArgs);
-          
-          // 로그에 tool call 기록
-          log.toolCalls!.push({
-            toolName,
-            args: toolArgs,
-            result: toolResult.content
-          });
-          
-          // Tool 결과를 메시지 히스토리에 추가
-          // AI는 이 결과를 보고 다음 행동을 결정합니다
+
+          log.toolCalls!.push({ toolName, args: toolArgs, result: toolResult.content });
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
             content: toolResult.content
           });
         }
-        // 루프 계속 - AI가 결과를 보고 추가 도구 호출 또는 최종 응답 결정
         continue;
       }
-      
-      // 케이스 2: AI가 최종 텍스트 응답을 생성한 경우
-      if (choice.finish_reason === "stop" && choice.message.content) {
+
+      // 케이스 2: 최종 응답 (stop 또는 length 둘 다 처리)
+      if (choice.message?.content) {
         log.output = choice.message.content;
         log.status = "completed";
         log.message = `${config.name} 완료`;
         log.duration = Date.now() - startTime;
         return log;
       }
-      
+
       break;
     }
-    
-    // 최대 반복 도달시 처리
-    log.output = messages[messages.length - 1].content as string || "응답 생성 실패";
+
+    log.output = "응답 생성 실패";
     log.status = "completed";
     log.duration = Date.now() - startTime;
     
   } catch (error) {
+    const apiError = error as any;
+    // 에러 전체 내용 로그
+    console.error(`[${config.name}] ❌ 에러 발생:`);
+    console.error("  HTTP 상태:", apiError.status);
+    console.error("  메시지:", apiError.error?.message || apiError.message);
+    console.error("  코드:", apiError.error?.code);
+    console.error("  타입:", apiError.error?.type);
+    console.error("  전체:", JSON.stringify(apiError.error || apiError.message));
+
+    // UI에 보여줄 에러 메시지 조합
+    const errDetail = apiError.error?.message || apiError.message || "알 수 없는 오류";
+    const errCode = apiError.error?.code ? ` (${apiError.error.code})` : "";
+    const errStatus = apiError.status ? `[HTTP ${apiError.status}] ` : "";
+
     log.status = "error";
-    log.message = `에러: ${error instanceof Error ? error.message : "알 수 없는 오류"}`;
+    log.message = `에러: ${errStatus}${errDetail}${errCode}`;
+    log.output = `${errStatus}${errDetail}${errCode}`;
     log.duration = Date.now() - startTime;
   }
   
   return log;
 }
+
+/**
+ * 비평가 판정 전용 함수
+ * 
+ * 일반 runAgent와 다른 점:
+ * - 반드시 JSON 형식으로 "승인/반려 판정"을 반환
+ * - 반려 시 구체적인 이유, 문제점, 개선 제안 포함
+ * - 품질 점수(0~100) 반환
+ * 
+ * 이 판정 결과를 오케스트레이터가 보고
+ * "재시도 vs 다음 단계 진행" 결정
+ */
+export async function runCriticJudgement(
+  researchOutput: string,
+  analysisOutput: string,
+  query: string,
+  apiKey: string,
+  projectId: string = "",
+  attempt: number = 1
+): Promise<{ log: AgentLog; judgement: CriticJudgement }> {
+
+  const startTime = Date.now();
+  const log: AgentLog = {
+    agentId: `critic-judge-${Date.now()}`,
+    agentRole: "critic",
+    agentName: "⚖️ 비평가 에이전트",
+    status: "running",
+    message: `품질 판정 중... (${attempt}차 시도)`,
+    toolCalls: [],
+    attempt,
+    output: "",
+    timestamp: new Date().toISOString()
+  };
+
+  // 기본 판정 (에러 시 fallback)
+  const fallbackJudgement: CriticJudgement = {
+    verdict: "approved",
+    reason: "판정 오류로 기본 승인 처리",
+    issues: [],
+    suggestions: [],
+    score: 60
+  };
+
+  try {
+    // fact_check 도구로 주요 주장 검증
+    const factCheckTool = MCP_TOOLS.filter(t => t.name === "fact_check");
+    const openAITools = convertToOpenAITools(factCheckTool);
+
+    const systemPrompt = `당신은 엄격한 품질 관리 비평가입니다.
+리서치 결과와 분석 내용을 검토하고 반드시 아래 JSON 형식으로만 응답하세요.
+
+판정 기준:
+- 점수 80점 이상: 승인 (approved)
+- 점수 79점 이하: 반려 (rejected)
+
+엄격하게 평가하세요. 첫 시도는 특히 까다롭게 검토하세요.
+
+반드시 이 JSON 형식으로만 응답 (다른 텍스트 금지):
+{
+  "verdict": "approved" 또는 "rejected",
+  "score": 0~100 사이 숫자,
+  "reason": "판정 이유 한 문장",
+  "issues": ["문제점1", "문제점2"],
+  "suggestions": ["개선제안1", "개선제안2"]
+}`;
+
+    const userMessage = `[쿼리] ${query}
+
+[${attempt}차 리서치 결과]
+${researchOutput}
+
+[분석 결과]
+${analysisOutput}
+
+위 내용을 엄격히 평가하여 JSON으로 판정하세요.
+${attempt > 1 ? `(이전에 ${attempt-1}번 반려된 내용입니다. 개선되었는지 확인하세요.)` : "(첫 번째 시도입니다. 엄격하게 평가하세요.)"}`;
+
+    const messages: any[] = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage }
+    ];
+
+    // fact_check 도구 먼저 호출하게 유도
+    let iteration = 0;
+    while (iteration < 3) {
+      iteration++;
+
+      const response = await callOpenAI(apiKey, projectId, {
+        model: "gpt-4o-mini",
+        messages,
+        ...(openAITools.length > 0 ? { tools: openAITools, tool_choice: "auto" } : {}),
+        max_tokens: 1000,
+        temperature: 0.3  // 판정은 일관성 있게 낮은 temperature
+      });
+
+      const choice = response.choices[0];
+
+      // Tool 호출 처리
+      if (choice.finish_reason === "tool_calls" && choice.message.tool_calls) {
+        log.status = "tool_calling";
+        messages.push(choice.message);
+
+        for (const toolCall of choice.message.tool_calls) {
+          const toolName = toolCall.function.name;
+          const toolArgs = JSON.parse(toolCall.function.arguments);
+          const toolResult = await executeMCPTool(toolName, toolArgs);
+
+          log.toolCalls!.push({ toolName, args: toolArgs, result: toolResult.content });
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: toolResult.content
+          });
+        }
+        continue;
+      }
+
+      // 최종 응답 파싱
+      if (choice.message?.content) {
+        const rawOutput = choice.message.content;
+        log.output = rawOutput;
+
+        try {
+          // JSON 추출 (```json ... ``` 감싸진 경우도 처리)
+          const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            const judgement: CriticJudgement = {
+              verdict: parsed.verdict === "approved" ? "approved" : "rejected",
+              reason: parsed.reason || "판정 이유 없음",
+              issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+              suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+              score: typeof parsed.score === "number" ? parsed.score : 50
+            };
+
+            log.status = "completed";
+            log.message = judgement.verdict === "approved"
+              ? `✅ ${attempt}차 승인 (${judgement.score}점)`
+              : `❌ ${attempt}차 반려 (${judgement.score}점)`;
+            log.duration = Date.now() - startTime;
+
+            console.log(`[비평가] ${attempt}차 판정: ${judgement.verdict} (${judgement.score}점)`);
+            console.log(`[비평가] 이유: ${judgement.reason}`);
+            if (judgement.issues.length > 0) {
+              console.log(`[비평가] 문제점:`, judgement.issues);
+            }
+
+            return { log, judgement };
+          }
+        } catch (parseErr) {
+          console.error("[비평가] JSON 파싱 실패:", parseErr);
+        }
+
+        break;
+      }
+      break;
+    }
+
+  } catch (error) {
+    const apiError = error as any;
+    console.error("[비평가 판정] 에러:", apiError.message);
+    log.status = "error";
+    log.message = `판정 에러: ${apiError.message}`;
+    log.duration = Date.now() - startTime;
+  }
+
+  return { log, judgement: fallbackJudgement };
+}
+

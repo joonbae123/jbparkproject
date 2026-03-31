@@ -1,464 +1,270 @@
-# 🤖 AI Harness + MCP 통합 데모
+# AI Harness + MCP 스터디 데모
 
-> **AI Harness**와 **Model Context Protocol(MCP)**를 함께 학습하기 위한 스터디 프로젝트입니다.
-> 4개의 AI 에이전트가 파이프라인으로 협력하여 리서치 보고서를 자동 생성합니다.
-
----
-
-## 📚 목차
-
-1. [핵심 개념](#-핵심-개념)
-2. [시스템 아키텍처](#-시스템-아키텍처)
-3. [MCP란 무엇인가](#-mcp란-무엇인가)
-4. [AI Harness란 무엇인가](#-ai-harness란-무엇인가)
-5. [구현 코드 설명](#-구현-코드-설명)
-6. [실행 방법](#-실행-방법)
-7. [파이프라인 흐름](#-파이프라인-흐름)
-8. [학습 포인트](#-학습-포인트)
-9. [확장 아이디어](#-확장-아이디어)
+> 다중 AI 에이전트가 서로 검증하며 결론을 내리는 **Harness 패턴**과  
+> AI에 외부 도구를 연결하는 **MCP(Model Context Protocol)** 을 실습한 데모입니다.
 
 ---
 
-## 💡 핵심 개념
+## 🚀 데모 앱
 
-### AI Harness (AI 하네스)
-
-```
-하네스(Harness) = 마구(馬具) → 말을 제어하는 장비
-AI 하네스        = 여러 AI를 묶어서 체계적으로 제어/운용하는 프레임워크
-```
-
-**쉽게 말하면**: 여러 AI 에이전트들이 각자 역할을 맡아 협력하는 시스템
-
-### MCP (Model Context Protocol)
-
-```
-기존 방식:  AI ──→ Tool A (각각 커스텀 코드)
-            AI ──→ Tool B (각각 커스텀 코드)
-
-MCP 방식:   AI ──→ MCP Protocol ──→ Tool A
-                                 ──→ Tool B
-                                 ──→ Tool C
-```
-
-**쉽게 말하면**: AI와 외부 도구를 연결하는 **"USB 표준"** — Anthropic이 2024년 발표
+**라이브 URL**: `http://localhost:3000` (샌드박스 실행 중)  
+**GitHub**: https://github.com/joonbae123/jbparkproject
 
 ---
 
-## 🏗 시스템 아키텍처
+## 📚 핵심 개념 정리
+
+### 1. Harness란?
+
+**Harness = 여러 AI 에이전트를 조율하는 프레임워크**
+
+혼자 일하는 AI보다, **역할이 나뉜 여러 AI가 서로 검증**하면 더 정확한 결론을 낼 수 있습니다.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    AI Harness + MCP                      │
-│                                                          │
-│  사용자 쿼리                                              │
-│      │                                                   │
-│      ▼                                                   │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │              Orchestrator (지휘자)                │   │
-│  │         파이프라인 순서 결정 & 컨텍스트 전달       │   │
-│  └───┬────────────┬──────────────┬──────────────┬───┘   │
-│      │            │              │              │        │
-│      ▼            ▼              ▼              ▼        │
-│  ┌────────┐  ┌─────────┐  ┌──────────┐  ┌───────────┐  │
-│  │  🔍    │  │  📊     │  │   ⚖️     │  │    ✨     │  │
-│  │Resear- │  │Analyst  │  │  Critic  │  │Synthesizer│  │
-│  │cher    │  │         │  │          │  │           │  │
-│  └───┬────┘  └────┬────┘  └────┬─────┘  └─────┬─────┘  │
-│      │            │              │              │        │
-│      ▼            ▼              ▼              │        │
-│  ┌───────┐  ┌──────────┐  ┌──────────┐         │        │
-│  │  MCP  │  │   MCP    │  │   MCP    │         │        │
-│  │web_   │  │analyze_  │  │fact_     │         │        │
-│  │search │  │text      │  │check     │         │        │
-│  └───────┘  └──────────┘  └──────────┘         │        │
-│                                                  ▼        │
-│                                           최종 보고서      │
-└─────────────────────────────────────────────────────────┘
+비유: 신문사
+- 기자(Researcher)     → 취재
+- 에디터(Analyst)      → 분석 및 정리
+- 팩트체커(Critic)     → 사실 검증 + 반려/승인 판정
+- 편집장(Synthesizer)  → 최종 기사 작성
 ```
+
+#### ✅ 단방향 파이프라인 (구버전)
+```
+Researcher → Analyst → Critic → Synthesizer
+```
+- 단순히 전달만 함. 검증 후 피드백 없음.
+
+#### ✅ 피드백 루프 (현재 구현 - v2)
+```
+           ┌─────────────────────────────┐
+           │         피드백 루프          │
+           │                             │
+           │  Researcher ──► Analyst     │
+           │      ▲              │       │
+           │      │ 반려!        ▼       │
+           │      └──────── Critic       │
+           │               (판정관)      │
+           └──────────────────┼──────────┘
+                              │ 승인!
+                              ▼
+                         Synthesizer
+                        (최종 보고서)
+```
+
+- **Critic이 반려** → 이유와 개선 제안을 담아 **Researcher에게 되돌려 보냄**
+- 최대 3회 재시도. 매 시도마다 품질 점수(0~100) 기록
+- 모든 반려 이벤트 → **리포트로 시각화**
 
 ---
 
-## 🔌 MCP란 무엇인가
+### 2. MCP(Model Context Protocol)란?
 
-### 핵심 구성 요소
+**MCP = AI와 외부 도구를 연결하는 표준 인터페이스**
 
-| 개념 | 설명 | 이 프로젝트에서 |
-|------|------|----------------|
-| **Tools** | AI가 호출할 수 있는 함수 | `web_search`, `analyze_text`, `fact_check` |
-| **Resources** | AI가 읽을 수 있는 데이터 | (추후 확장 가능) |
-| **Prompts** | 재사용 가능한 프롬프트 | (추후 확장 가능) |
-
-### MCP Tool 정의 방식
-
-```typescript
-// src/mcp/tools.ts
-{
-  name: "web_search",
-  description: "주어진 쿼리로 웹을 검색합니다",  // ← AI가 이걸 보고 언제 쓸지 판단!
-  inputSchema: {
-    type: "object",
-    properties: {
-      query: { type: "string", description: "검색할 쿼리" }
-    },
-    required: ["query"]
-  }
-}
-```
-
-### MCP ↔ OpenAI 연동 흐름
+> "AI의 USB 포트"
 
 ```
-1. MCP Tool 정의 (JSON Schema)
-        ↓
-2. OpenAI Function Calling 형식으로 변환
-        ↓
-3. OpenAI API 호출 시 tools 파라미터로 전달
-        ↓
-4. AI가 Tool 호출 결정 → finish_reason: "tool_calls"
-        ↓
-5. executeMCPTool() 실행 → 결과 반환
-        ↓
-6. 결과를 메시지 히스토리에 추가
-        ↓
-7. AI가 결과 보고 최종 응답 생성
+AI ──(MCP)──► 도구(Tools)
+               ├── web_search    : 웹 검색
+               ├── analyze_text  : 텍스트 분석 (키워드 추출)
+               └── fact_check    : 팩트 체크
 ```
 
-### 통신 방식 비교
+#### MCP 핵심 흐름
 
-| 방식 | 사용 환경 | 특징 |
-|------|-----------|------|
-| **stdio** | 로컬 프로세스 | stdin/stdout, Claude Desktop |
-| **SSE (HTTP)** | 원격/웹 | HTTP 기반, 이 프로젝트에서 사용 |
+```
+1. AI가 질문을 받음
+2. "웹 검색이 필요하다" → MCP Client에 web_search 요청
+3. MCP Server가 실제 검색 실행
+4. 결과를 AI에 반환
+5. AI가 결과를 바탕으로 최종 답변 생성
+```
+
+#### MCP vs 일반 API 차이
+
+| 구분 | 일반 API 직접 호출 | MCP |
+|------|---------------------|-----|
+| 방식 | 코드에 하드코딩 | 표준 인터페이스 |
+| AI 개입 | AI가 직접 호출 불가 | AI가 스스로 도구 선택 |
+| 확장성 | 각각 연동 필요 | 표준 포맷으로 통일 |
 
 ---
 
-## 🎯 AI Harness란 무엇인가
-
-### 주요 패턴
-
-| 패턴 | 설명 | 이 프로젝트 |
-|------|------|-------------|
-| **Pipeline** | A→B→C 순서 처리 | ✅ 사용 |
-| **Parallel** | 동시 실행 후 통합 | - |
-| **Debate** | 서로 토론/검증 | - |
-| **Supervisor** | 상위 AI가 하위 AI 감독 | - |
-| **Reflexion** | 자기 반복 검증 | - |
-
-### 에이전트 역할 분담
-
-```typescript
-// src/harness/agent.ts
-const AGENT_CONFIGS = {
-  researcher: {
-    systemPrompt: "전문 리서처...",
-    allowedTools: ["web_search"]         // ← 이 에이전트만 쓸 수 있는 MCP Tools
-  },
-  analyst: {
-    systemPrompt: "데이터 분석 전문가...",
-    allowedTools: ["analyze_text"]
-  },
-  critic: {
-    systemPrompt: "비판적 사고 전문가...",
-    allowedTools: ["fact_check"]
-  },
-  synthesizer: {
-    systemPrompt: "최종 보고서 작성 전문가...",
-    allowedTools: []                     // ← 도구 없이 종합만 담당
-  }
-}
-```
-
-### 컨텍스트 전달 메커니즘
+### 3. Harness + MCP 결합 구조
 
 ```
-Researcher 출력
-    │
-    ▼ (previousContext로 전달)
-Analyst 입력 = "이전 에이전트 결과: [Researcher 출력]\n\n현재 작업: ..."
-    │
-    ▼ (researcher + analyst 출력 모두 전달)
-Critic 입력  = "[리서처 결과]\n...\n[분석가 결과]\n...\n\n현재 작업: ..."
-    │
-    ▼ (모든 이전 출력 전달)
-Synthesizer 입력 = "[리서치]\n...\n[분석]\n...\n[검증]\n...\n\n최종 보고서 작성"
+[사용자 쿼리]
+      │
+      ▼
+  오케스트레이터 (orchestrator.ts)
+      │
+      ├──► 🔍 Researcher ──► web_search (MCP Tool)
+      │         │
+      ├──► 📊 Analyst ──► analyze_text (MCP Tool)
+      │         │
+      ├──► ⚖️ Critic ──► fact_check (MCP Tool)
+      │         │
+      │    판정: 승인/반려
+      │         │
+      │    ❌ 반려 → Researcher로 피드백 전달 (재시도)
+      │    ✅ 승인 → 다음 단계
+      │
+      └──► ✨ Synthesizer → 최종 보고서
 ```
 
 ---
 
-## 📁 구현 코드 설명
-
-### 프로젝트 구조
+## 🗂️ 프로젝트 구조
 
 ```
 webapp/
 ├── src/
-│   ├── server.ts              # 메인 서버 + 프론트엔드 UI
+│   ├── server.ts              # Hono HTTP 서버 + 전체 UI HTML
 │   ├── mcp/
-│   │   └── tools.ts           # MCP Tool 정의 & 실행기
+│   │   └── tools.ts           # MCP 도구 정의 (web_search, analyze_text, fact_check)
 │   ├── harness/
-│   │   ├── types.ts           # 타입 정의
-│   │   ├── agent.ts           # 단일 Agent 실행 로직
-│   │   └── orchestrator.ts    # Harness 파이프라인 오케스트레이터
+│   │   ├── types.ts           # 타입 정의 (AgentLog, RetryEvent, HarnessResult 등)
+│   │   ├── agent.ts           # 단일 에이전트 실행 (runAgent, runCriticJudgement)
+│   │   └── orchestrator.ts    # 피드백 루프 오케스트레이터 (runHarness)
 │   └── routes/
-│       └── api.ts             # Hono API 라우트
-├── ecosystem.config.cjs       # PM2 설정
+│       └── api.ts             # POST /api/harness, GET /api/health
+├── ecosystem.config.cjs       # PM2 서비스 설정
 ├── package.json
 └── tsconfig.json
 ```
 
-### 핵심 파일별 역할
+---
 
-#### `src/mcp/tools.ts` — MCP 핵심
+## 🔄 반려/재시도 리포트 기능
 
-```typescript
-// Tool 등록
-export const MCP_TOOLS = [
-  { name: "web_search", description: "...", inputSchema: {...} },
-  { name: "analyze_text", description: "...", inputSchema: {...} },
-  { name: "fact_check", description: "...", inputSchema: {...} }
-];
+Critic이 반려할 때마다 아래 정보가 기록됩니다:
 
-// Tool 실행
-export async function executeMCPTool(toolName, args) {
-  switch(toolName) {
-    case "web_search": return await callSearchAPI(args.query);
-    case "analyze_text": return await analyzeText(args.text);
-    case "fact_check": return await checkFact(args.claim);
-  }
-}
+| 항목 | 내용 |
+|------|------|
+| 총 시도 횟수 | 몇 번 루프를 돌았는지 |
+| 반려 횟수 | 비평가가 몇 번 반려했는지 |
+| 품질 점수 추이 | 1차→2차→3차 점수 변화 (바 차트) |
+| 반려 이유 | 각 반려 시 구체적 문제점 목록 |
+| 개선 제안 | 비평가가 제시한 개선 방향 |
+| 개선 요약 | 최종 점수와 변화 요약 |
 
-// OpenAI 형식으로 변환
-export function convertToOpenAITools(mcpTools) {
-  return mcpTools.map(tool => ({
-    type: "function",
-    function: { name: tool.name, description: tool.description, parameters: tool.inputSchema }
-  }));
-}
+### 예시 흐름
+```
+1차 시도: Researcher 리서치 → Analyst 분석 → Critic 판정 → ❌ 62점 반려
+  반려 이유: "출처가 불명확하고 최신 데이터 부족"
+
+2차 시도: Researcher 재리서치 (피드백 반영) → Analyst → Critic → ✅ 85점 승인
+  → Synthesizer 최종 보고서 작성
 ```
 
-#### `src/harness/agent.ts` — Agent 핵심 루프
+---
+
+## 💡 사용 방법
+
+1. **OpenAI API Key 발급**: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+2. 데모 앱 접속 후 API Key 입력
+3. 리서치 주제 입력 (예시 버튼 클릭 가능)
+4. **"Harness 실행"** 클릭
+5. 4개 에이전트가 순서대로 실행되는 과정 실시간 확인
+6. **반려/재시도 리포트**에서 품질 점수 추이 확인
+7. 최종 보고서 확인
+
+---
+
+## ⚙️ 기술 스택
+
+| 구분 | 기술 |
+|------|------|
+| 서버 | [Hono](https://hono.dev/) + Node.js |
+| 언어 | TypeScript |
+| AI | OpenAI gpt-4o-mini (fetch 직접 호출) |
+| 실시간 스트리밍 | SSE (Server-Sent Events) |
+| UI | Tailwind CSS (CDN) + FontAwesome |
+| 프로세스 관리 | PM2 |
+
+---
+
+## 🧩 핵심 코드 해설
+
+### agent.ts - Agent Loop
 
 ```typescript
-// Tool Calling 루프
+// AI가 "충분하다"고 판단할 때까지 Tool 호출 반복
 while (iteration < maxIterations) {
-  const response = await openai.chat.completions.create({
+  const response = await callOpenAI(apiKey, {
     model: "gpt-4o-mini",
     messages,
-    tools: openAITools,    // MCP Tools를 OpenAI 형식으로 변환해서 전달
-    tool_choice: "auto"    // AI가 자율적으로 결정
+    tools: openAITools,  // MCP 도구 목록 전달
   });
 
-  if (response.choices[0].finish_reason === "tool_calls") {
-    // AI가 도구 호출을 결정한 경우
-    const result = await executeMCPTool(toolName, toolArgs);
+  if (choice.finish_reason === "tool_calls") {
+    // AI가 도구 호출 결정 → 실행 후 결과를 메시지에 추가
+    const result = await executeMCPTool(toolName, args);
     messages.push({ role: "tool", content: result });
-    continue;  // 결과 보고 다시 판단하게 루프 계속
+    continue;  // 다시 AI에게 전달
   }
-  
-  if (response.choices[0].finish_reason === "stop") {
-    // AI가 최종 응답 생성 완료
-    return response.choices[0].message.content;
-  }
+
+  // 최종 응답 반환
+  return choice.message.content;
 }
 ```
 
-#### `src/routes/api.ts` — SSE 스트리밍
+### orchestrator.ts - 피드백 루프
 
 ```typescript
-// Server-Sent Events로 실시간 전송
-return new Response(
-  new ReadableStream({
-    async start(controller) {
-      await runHarness(query, apiKey, (agentLog) => {
-        // 에이전트 완료시마다 실시간 전송
-        controller.enqueue(`event: agent_complete\ndata: ${JSON.stringify(agentLog)}\n\n`);
-      });
-      controller.close();
-    }
-  }),
-  { headers: { "Content-Type": "text/event-stream" } }
-);
+while (!approved && attempt < MAX_RETRY) {
+  attempt++;
+
+  // 1. 리서처 실행
+  const researchLog = await runAgent("researcher", query + previousFeedback);
+
+  // 2. 분석가 실행
+  const analysisLog = await runAgent("analyst", researchLog.output);
+
+  // 3. 비평가 판정 (JSON 형식으로 승인/반려 결정)
+  const { judgement } = await runCriticJudgement(researchLog, analysisLog);
+
+  if (judgement.verdict === "rejected") {
+    // 반려 → 피드백을 다음 리서처에게 전달
+    previousFeedback = judgement.issues + judgement.suggestions;
+    retryEvents.push({ attempt, judgement });  // 리포트 기록
+  } else {
+    approved = true;  // 승인 → 루프 탈출
+  }
+}
+
+// 4. 최종 종합가 실행
+const finalReport = await runAgent("synthesizer", allContext);
 ```
 
 ---
 
-## 🚀 실행 방법
+## 🔑 자주 묻는 질문
 
-### 사전 요구사항
+**Q. Project ID도 필요한가요?**  
+A. 아니요! API Key(`sk-proj-...` 또는 `sk-...`) 하나만 있으면 됩니다. Project ID는 특정 조직 설정에서만 필요합니다.
 
-- Node.js 18+
-- OpenAI API Key
+**Q. API 키는 어디서 찾나요?**  
+A. [platform.openai.com/api-keys](https://platform.openai.com/api-keys) → "API Keys" 탭 → "+ Create new secret key"
 
-### 설치 및 실행
+**Q. 크레딧이 있는데 401 에러가 나요?**  
+A. 키가 만료되었거나 잘못 복사된 경우입니다. 새 키를 발급받으세요.
 
-```bash
-# 1. 의존성 설치
-npm install
+**Q. Critic은 항상 반려하나요?**  
+A. 아니요. 80점 이상이면 승인, 79점 이하면 반려입니다. 품질이 좋으면 첫 시도에 바로 승인됩니다.
 
-# 2. 서버 실행 (PM2)
-pm2 start ecosystem.config.cjs
-
-# 3. 브라우저에서 접속
-open http://localhost:3000
-```
-
-### API 엔드포인트
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| GET | `/api/health` | 서버 상태 + MCP 도구 목록 |
-| GET | `/api/tools` | MCP Tool 전체 목록 |
-| POST | `/api/harness` | Harness 실행 (SSE) |
-
-### 테스트 쿼리 예시
-
-```bash
-curl -X POST http://localhost:3000/api/harness \
-  -H "Content-Type: application/json" \
-  -d '{"query": "AI Harness의 미래 전망", "apiKey": "sk-..."}'
-```
+**Q. 오케스트레이터도 AI인가요?**  
+A. 현재 구현은 TypeScript 코드로 하드코딩된 순서입니다 (코드 오케스트레이터). AI 오케스트레이터로 업그레이드하면 Claude 같은 AI가 동적으로 에이전트 실행 순서를 결정합니다.
 
 ---
 
-## 🔄 파이프라인 흐름
+## 📈 다음 스터디 단계
 
-```
-Step 1: Researcher
-  → web_search("AI Harness와 MCP의 미래 전망") 호출
-  → MCP가 검색 결과 반환
-  → 리서치 요약 생성
-
-Step 2: Analyst  
-  → [Step 1 결과]를 컨텍스트로 받음
-  → analyze_text(리서치 내용) 호출
-  → 핵심 인사이트 추출
-
-Step 3: Critic
-  → [Step 1+2 결과]를 컨텍스트로 받음
-  → fact_check(주요 주장들) 호출
-  → 검증 및 보완점 제시
-
-Step 4: Synthesizer
-  → [Step 1+2+3 결과]를 컨텍스트로 받음
-  → 도구 없이 종합
-  → 최종 보고서 생성
-```
+- [ ] **AI 오케스트레이터**: Claude가 에이전트 실행 순서를 동적으로 결정
+- [ ] **Debate 패턴**: 두 에이전트가 찬반 논쟁 후 심판이 결정
+- [ ] **실제 MCP 서버 연동**: stdio/SSE 방식으로 외부 MCP 서버 연결
+- [ ] **멀티 모델**: Researcher는 GPT-4o-mini, Critic은 Claude 사용
 
 ---
 
-## 📖 학습 포인트
-
-### 1. MCP의 핵심 가치
-
-```
-문제: AI마다 다른 방식으로 도구 연동 → 파편화
-해결: 표준화된 인터페이스로 "한번 만들면 어디서나 사용"
-
-현실 비유:
-  기존: TV 리모컨, 에어컨 리모컨, 선풍기 리모컨 (각각 따로)
-  MCP:  만능 리모컨 하나로 모든 가전 제어
-```
-
-### 2. Tool Calling의 동작 원리
-
-```
-AI는 "언제 도구를 쓸지"를 description 보고 스스로 판단합니다.
-→ description 작성이 매우 중요!
-
-나쁜 예: description: "데이터 처리"  (모호함)
-좋은 예: description: "최신 웹 정보가 필요할 때 검색. 현재 날씨, 최근 뉴스, 실시간 데이터 조회에 사용"
-```
-
-### 3. Agent 컨텍스트 전달
-
-```
-각 에이전트는 독립적이지만,
-이전 에이전트의 결과를 "시스템 메시지 + 유저 메시지"로 받아
-문맥을 유지하며 작업합니다.
-```
-
-### 4. SSE vs WebSocket
-
-```
-이 프로젝트에서 SSE를 선택한 이유:
-✅ 서버→클라이언트 단방향으로 충분
-✅ HTTP 기반으로 방화벽 친화적  
-✅ 자동 재연결 지원
-✅ 구현 단순함
-```
-
-### 5. 에이전트 역할 분리의 장점
-
-```
-단일 AI에게 모든 걸 시키면:
-→ 지시가 길어질수록 품질 저하
-→ 어디서 실패했는지 추적 어려움
-
-역할 분리하면:
-→ 각자 전문화 → 품질 향상
-→ 단계별 디버깅 가능
-→ 필요한 에이전트만 교체/수정 가능
-```
-
----
-
-## 🔮 확장 아이디어
-
-### 단기 (바로 구현 가능)
-
-- [ ] **실제 웹 검색** 연동 (Brave Search API, Tavily API)
-- [ ] **Debate 패턴** 추가 (찬성봇 vs 반대봇)
-- [ ] **Reflexion 패턴** (자기 검증 루프)
-- [ ] 에이전트 수/순서 **동적 설정**
-
-### 중기
-
-- [ ] **실제 MCP 서버** 분리 (stdio 방식)
-- [ ] **에이전트 메모리** 추가 (대화 히스토리 유지)
-- [ ] **병렬 실행** 패턴 구현
-- [ ] **Cloudflare D1**으로 실행 기록 저장
-
-### 장기
-
-- [ ] **Claude + GPT 혼합** 하네스 (모델별 특기 활용)
-- [ ] **자율 계획** 에이전트 (사람이 파이프라인 설계 안해도 됨)
-- [ ] **멀티모달** 지원 (이미지 분석 에이전트)
-
----
-
-## 🛠 기술 스택
-
-| 분류 | 기술 |
-|------|------|
-| **Runtime** | Node.js 18+ |
-| **Framework** | Hono v4 |
-| **AI SDK** | OpenAI Node.js SDK v4 |
-| **MCP** | @modelcontextprotocol/sdk |
-| **Language** | TypeScript |
-| **Process Manager** | PM2 |
-| **Frontend** | Vanilla JS + Tailwind CSS CDN |
-| **Streaming** | Server-Sent Events (SSE) |
-
----
-
-## 📝 스터디 메모
-
-### 배운 것
-
-1. **MCP = AI-Tool 연결 표준화** → 한번 만들면 어떤 AI에도 붙일 수 있다
-2. **Harness = 오케스트레이션** → 누가 언제 뭘 할지 제어하는 지휘자
-3. **Tool Calling Loop** → AI가 "충분하다"고 판단할 때까지 도구 계속 호출 가능
-4. **Pipeline 패턴** → 단순하지만 강력, 각 단계 결과가 다음 단계 입력이 됨
-5. **SSE로 실시간 UI** → 긴 작업도 단계별로 사용자에게 즉시 피드백 가능
-
-### 더 공부할 것
-
-- [ ] LangChain, LangGraph와의 비교
-- [ ] AutoGPT, CrewAI 등 기존 프레임워크와 MCP의 관계
-- [ ] MCP 공식 서버 저장소 탐색 (github.com/modelcontextprotocol/servers)
-- [ ] Supervisor 패턴 구현
-
----
-
-*이 프로젝트는 AI Harness와 MCP 학습을 위한 스터디 데모입니다.*
+*최종 업데이트: 2026-03-31*

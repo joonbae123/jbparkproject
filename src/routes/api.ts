@@ -53,12 +53,12 @@ api.get("/tools", (c) => {
  * - 각 에이전트 완료시마다 즉시 UI에 업데이트
  * - 사용자가 진행 상황을 실시간으로 볼 수 있음
  * 
- * Request body: { query: string, apiKey: string }
+ * Request body: { query: string, apiKey: string, projectId?: string }
  */
 api.post("/harness", async (c) => {
   try {
     const body = await c.req.json();
-    const { query, apiKey } = body;
+    const { query, apiKey, projectId = "" } = body;
     
     if (!query || !apiKey) {
       return c.json({ error: "query와 apiKey가 필요합니다" }, 400);
@@ -88,10 +88,14 @@ api.post("/harness", async (c) => {
             const result = await runHarness(
               query,
               apiKey,
-              (agentLog) => {
-                // 에이전트 완료 이벤트 - UI에서 실시간으로 받아서 표시
+              (agentLog, retryEvent) => {
+                if (retryEvent) {
+                  // 반려 이벤트 별도 전송
+                  sendEvent("retry_event", retryEvent);
+                }
                 sendEvent("agent_complete", agentLog);
-              }
+              },
+              projectId
             );
             
             // 최종 완료 이벤트

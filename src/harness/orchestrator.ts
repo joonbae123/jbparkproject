@@ -1,155 +1,249 @@
 /**
- * AI Harness 오케스트레이터
- * 
- * 오케스트레이터는 "지휘자"입니다.
- * 
- * 역할:
- * - 어떤 에이전트를 어떤 순서로 실행할지 결정
- * - 에이전트 간 컨텍스트(정보) 전달
- * - 전체 파이프라인 실행 및 결과 수집
- * 
- * 이 데모의 파이프라인:
- * 
+ * AI Harness 오케스트레이터 v2 - 피드백 루프 버전
+ *
+ * 핵심 변경사항:
+ * - 비평가가 "반려" 판정 시 리서처로 되돌아가 재시도
+ * - 최대 3번까지 재시도 (무한루프 방지)
+ * - 모든 반려/재시도 이벤트를 기록 → 리포트 생성
+ *
+ * 새로운 파이프라인:
+ *
  *  사용자 쿼리
  *      │
  *      ▼
- *  ┌─────────────┐
- *  │  Researcher │ ← web_search MCP Tool 사용
- *  │  (리서처)   │   → 관련 정보 수집
- *  └──────┬──────┘
- *         │ 리서치 결과 전달
- *         ▼
- *  ┌─────────────┐
- *  │   Analyst   │ ← analyze_text MCP Tool 사용
- *  │  (분석가)   │   → 데이터 분석 및 인사이트
- *  └──────┬──────┘
- *         │ 분석 결과 전달
- *         ▼
- *  ┌─────────────┐
- *  │    Critic   │ ← fact_check MCP Tool 사용
- *  │  (비평가)   │   → 주장 검증 및 보완
- *  └──────┬──────┘
- *         │ 검증 결과 전달
- *         ▼
- *  ┌─────────────┐
- *  │ Synthesizer │ ← MCP Tool 없음
- *  │  (종합가)   │   → 모든 내용 종합, 최종 보고서 작성
- *  └──────┬──────┘
- *         │
- *         ▼
- *    최종 보고서
+ *  ┌─────────────────────────────────────┐
+ *  │           피드백 루프                │
+ *  │                                     │
+ *  │  ┌──────────┐    ┌──────────┐       │
+ *  │  │Researcher│───►│ Analyst  │       │
+ *  │  └──────────┘    └────┬─────┘       │
+ *  │       ▲               │             │
+ *  │       │ 반려!          ▼             │
+ *  │       │         ┌──────────┐        │
+ *  │       └─────────│  Critic  │        │
+ *  │                 │ (판정관) │        │
+ *  │                 └────┬─────┘        │
+ *  │                      │ 승인!        │
+ *  └──────────────────────┼─────────────┘
+ *                         ▼
+ *                  ┌──────────────┐
+ *                  │ Synthesizer  │
+ *                  │ (최종 보고서) │
+ *                  └──────────────┘
  */
 
-import { runAgent } from "./agent.js";
-import type { HarnessResult, AgentLog } from "./types.js";
+import { runAgent, runCriticJudgement } from "./agent.js";
+import type {
+  HarnessResult,
+  AgentLog,
+  RetryEvent,
+  RetryReport,
+  CriticJudgement
+} from "./types.js";
 
-/**
- * Harness 파이프라인 실행
- * 
- * @param query - 사용자 질문/주제
- * @param apiKey - OpenAI API 키
- * @param onAgentUpdate - 에이전트 완료시 실시간 콜백 (UI 업데이트용)
- */
+const MAX_RETRY = 3; // 최대 재시도 횟수
+
 export async function runHarness(
   query: string,
   apiKey: string,
-  onAgentUpdate?: (log: AgentLog) => void
+  onAgentUpdate?: (log: AgentLog, event?: RetryEvent) => void,
+  projectId: string = ""
 ): Promise<HarnessResult> {
-  
+
   const startTime = Date.now();
-  const logs: AgentLog[] = [];
+  const allLogs: AgentLog[] = [];
   const mcpToolsUsed: string[] = [];
-  
-  console.log("\n========== AI Harness 시작 ==========");
+  const retryEvents: RetryEvent[] = [];
+  const qualityProgression: number[] = [];
+
+  const collectTools = (log: AgentLog) => {
+    log.toolCalls?.forEach(tc => {
+      if (!mcpToolsUsed.includes(tc.toolName)) mcpToolsUsed.push(tc.toolName);
+    });
+  };
+
+  const trimContext = (text: string, maxLen = 1500) =>
+    text.length > maxLen ? text.slice(0, maxLen) + "\n...(이하 생략)" : text;
+
+  console.log("\n========== AI Harness v2 (피드백 루프) 시작 ==========");
   console.log(`쿼리: ${query}`);
-  console.log("=====================================\n");
-  
-  // ===== Step 1: Researcher Agent =====
-  // 역할: 주제에 대한 기본 정보 수집
-  console.log("🔍 [Step 1] Researcher Agent 실행 중...");
-  const researchLog = await runAgent(
-    "researcher",
-    `다음 주제에 대해 리서치하세요: "${query}"
-    관련된 최신 정보, 주요 개념, 현황을 조사해주세요.`,
-    apiKey,
-    "" // 첫 번째 에이전트이므로 이전 컨텍스트 없음
-  );
-  logs.push(researchLog);
-  
-  // 사용된 MCP 도구 수집
-  researchLog.toolCalls?.forEach(tc => {
-    if (!mcpToolsUsed.includes(tc.toolName)) {
-      mcpToolsUsed.push(tc.toolName);
+  console.log(`최대 재시도: ${MAX_RETRY}회`);
+  console.log("=====================================================\n");
+
+  // ===== 피드백 루프 =====
+  let attempt = 0;
+  let approved = false;
+  let finalResearchLog: AgentLog | null = null;
+  let finalAnalysisLog: AgentLog | null = null;
+  let lastJudgement: CriticJudgement | null = null;
+  let previousFeedback = ""; // 이전 반려 피드백 (재시도 시 전달)
+
+  while (!approved && attempt < MAX_RETRY) {
+    attempt++;
+    console.log(`\n--- ${attempt}차 시도 시작 ---`);
+
+    // Step 1: 리서처
+    console.log(`🔍 [${attempt}차] Researcher Agent 실행 중...`);
+    const researchLog = await runAgent(
+      "researcher",
+      `다음 주제에 대해 리서치하세요: "${query}"
+관련된 최신 정보, 주요 개념, 현황을 조사해주세요.
+${previousFeedback ? `\n[이전 반려 피드백 - 반드시 반영하세요]\n${previousFeedback}` : ""}`,
+      apiKey,
+      "",
+      projectId
+    );
+    researchLog.attempt = attempt;
+    allLogs.push(researchLog);
+    collectTools(researchLog);
+    onAgentUpdate?.(researchLog);
+
+    // Step 2: 분석가
+    console.log(`📊 [${attempt}차] Analyst Agent 실행 중...`);
+    const analysisLog = await runAgent(
+      "analyst",
+      `위의 리서치 결과를 심층 분석하여 핵심 인사이트와 패턴을 도출하세요.`,
+      apiKey,
+      trimContext(researchLog.output || ""),
+      projectId
+    );
+    analysisLog.attempt = attempt;
+    allLogs.push(analysisLog);
+    collectTools(analysisLog);
+    onAgentUpdate?.(analysisLog);
+
+    // Step 3: 비평가 판정 (승인/반려 결정)
+    console.log(`⚖️ [${attempt}차] Critic Agent 판정 중...`);
+    const { log: criticLog, judgement } = await runCriticJudgement(
+      trimContext(researchLog.output || "", 800),
+      trimContext(analysisLog.output || "", 800),
+      query,
+      apiKey,
+      projectId,
+      attempt
+    );
+    criticLog.attempt = attempt;
+    allLogs.push(criticLog);
+    collectTools(criticLog);
+    qualityProgression.push(judgement.score);
+    lastJudgement = judgement;
+
+    if (judgement.verdict === "rejected") {
+      // 반려 처리
+      const retryEvent: RetryEvent = {
+        attempt,
+        rejectedAt: new Date().toISOString(),
+        judgement,
+        researcherOutput: researchLog.output || "",
+        criticOutput: criticLog.output || ""
+      };
+      retryEvents.push(retryEvent);
+
+      // 다음 재시도에 전달할 피드백 구성
+      previousFeedback = `
+반려 이유: ${judgement.reason}
+문제점:
+${judgement.issues.map((i, idx) => `  ${idx + 1}. ${i}`).join("\n")}
+개선 제안:
+${judgement.suggestions.map((s, idx) => `  ${idx + 1}. ${s}`).join("\n")}
+      `.trim();
+
+      console.log(`❌ ${attempt}차 반려 (${judgement.score}점) - 재시도 예정`);
+      onAgentUpdate?.(criticLog, retryEvent);
+
+      if (attempt >= MAX_RETRY) {
+        console.log(`⚠️ 최대 재시도 횟수(${MAX_RETRY}) 도달 - 강제 진행`);
+        approved = true; // 최대 재시도 도달 시 강제 통과
+      }
+    } else {
+      // 승인 처리
+      approved = true;
+      finalResearchLog = researchLog;
+      finalAnalysisLog = analysisLog;
+      console.log(`✅ ${attempt}차 승인 (${judgement.score}점) - 다음 단계 진행`);
+      onAgentUpdate?.(criticLog);
     }
-  });
-  
-  // 실시간 UI 업데이트 콜백
-  onAgentUpdate?.(researchLog);
-  
-  // ===== Step 2: Analyst Agent =====
-  // 역할: 리서처의 결과를 분석하여 인사이트 도출
-  console.log("📊 [Step 2] Analyst Agent 실행 중...");
-  const analysisLog = await runAgent(
-    "analyst",
-    `위의 리서치 결과를 심층 분석하여 핵심 인사이트와 패턴을 도출하세요.`,
-    apiKey,
-    researchLog.output || "" // 리서처 결과를 컨텍스트로 전달
-  );
-  logs.push(analysisLog);
-  
-  analysisLog.toolCalls?.forEach(tc => {
-    if (!mcpToolsUsed.includes(tc.toolName)) {
-      mcpToolsUsed.push(tc.toolName);
-    }
-  });
-  
-  onAgentUpdate?.(analysisLog);
-  
-  // ===== Step 3: Critic Agent =====
-  // 역할: 이전 에이전트들의 결과를 검증하고 비판적으로 평가
-  console.log("⚖️ [Step 3] Critic Agent 실행 중...");
-  const criticLog = await runAgent(
-    "critic",
-    `위의 리서치와 분석 내용에서 주요 주장들을 검증하고, 놓친 부분이나 개선점을 제시하세요.`,
-    apiKey,
-    `[리서처 결과]\n${researchLog.output}\n\n[분석가 결과]\n${analysisLog.output}`
-  );
-  logs.push(criticLog);
-  
-  criticLog.toolCalls?.forEach(tc => {
-    if (!mcpToolsUsed.includes(tc.toolName)) {
-      mcpToolsUsed.push(tc.toolName);
-    }
-  });
-  
-  onAgentUpdate?.(criticLog);
-  
-  // ===== Step 4: Synthesizer Agent =====
-  // 역할: 모든 에이전트의 결과를 종합하여 최종 보고서 작성
-  console.log("✨ [Step 4] Synthesizer Agent 실행 중...");
+  }
+
+  // 최종 결과 사용할 로그 (승인된 것 or 마지막 시도)
+  if (!finalResearchLog || !finalAnalysisLog) {
+    const researchLogs = allLogs.filter(l => l.agentRole === "researcher");
+    const analysisLogs = allLogs.filter(l => l.agentRole === "analyst");
+    finalResearchLog = researchLogs[researchLogs.length - 1];
+    finalAnalysisLog = analysisLogs[analysisLogs.length - 1];
+  }
+
+  const criticLogs = allLogs.filter(l => l.agentRole === "critic");
+  const finalCriticLog = criticLogs[criticLogs.length - 1];
+
+  // Step 4: 종합가 (최종 보고서)
+  console.log(`✨ Synthesizer Agent 실행 중...`);
   const synthLog = await runAgent(
     "synthesizer",
     `쿼리: "${query}"\n\n위의 모든 에이전트 작업을 종합하여 최종 보고서를 작성하세요.`,
     apiKey,
-    `[리서치]\n${researchLog.output}\n\n[분석]\n${analysisLog.output}\n\n[검증/비평]\n${criticLog.output}`
+    `[리서치 (${attempt}차 최종)]\n${trimContext(finalResearchLog?.output || "", 700)}\n\n[분석]\n${trimContext(finalAnalysisLog?.output || "", 700)}\n\n[검증/비평]\n${trimContext(finalCriticLog?.output || "", 700)}`,
+    projectId
   );
-  logs.push(synthLog);
-  
+  allLogs.push(synthLog);
   onAgentUpdate?.(synthLog);
-  
+
+  // ===== 반려/재시도 리포트 생성 =====
+  const retryReport: RetryReport = {
+    totalAttempts: attempt,
+    totalRejections: retryEvents.length,
+    finalVerdict: lastJudgement?.verdict || "approved",
+    retryEvents,
+    qualityProgression,
+    improvementSummary: generateImprovementSummary(retryEvents, qualityProgression, attempt)
+  };
+
   const totalDuration = Date.now() - startTime;
-  
-  console.log("\n========== AI Harness 완료 ==========");
+
+  console.log("\n========== AI Harness v2 완료 ==========");
   console.log(`총 소요 시간: ${totalDuration}ms`);
-  console.log(`사용된 MCP 도구: ${mcpToolsUsed.join(", ")}`);
-  console.log("=====================================\n");
-  
+  console.log(`총 시도 횟수: ${attempt}회`);
+  console.log(`총 반려 횟수: ${retryEvents.length}회`);
+  console.log(`품질 점수 추이: ${qualityProgression.join(" → ")}`);
+  console.log("=========================================\n");
+
   return {
     query,
-    logs,
+    logs: allLogs,
     finalReport: synthLog.output || "보고서 생성 실패",
+    retryReport,
     totalDuration,
     mcpToolsUsed,
-    agentsExecuted: logs.length
+    agentsExecuted: allLogs.length
   };
+}
+
+/**
+ * 반려→승인 과정 요약 텍스트 생성
+ */
+function generateImprovementSummary(
+  retryEvents: RetryEvent[],
+  qualityProgression: number[],
+  totalAttempts: number
+): string {
+  if (retryEvents.length === 0) {
+    return `첫 번째 시도에서 바로 승인되었습니다. (품질 점수: ${qualityProgression[0]}점)`;
+  }
+
+  const firstScore = qualityProgression[0];
+  const lastScore = qualityProgression[qualityProgression.length - 1];
+  const improvement = lastScore - firstScore;
+
+  const allIssues = retryEvents.flatMap(e => e.judgement.issues);
+  const uniqueIssues = [...new Set(allIssues)];
+
+  return `
+총 ${totalAttempts}차 시도 끝에 최종 ${qualityProgression[qualityProgression.length-1]}점으로 완료되었습니다.
+
+품질 점수 변화: ${qualityProgression.join("점 → ")}점
+개선폭: ${improvement > 0 ? "+" : ""}${improvement}점
+
+주요 반려 사유:
+${uniqueIssues.slice(0, 3).map((issue, i) => `  ${i + 1}. ${issue}`).join("\n")}
+  `.trim();
 }
