@@ -80,16 +80,22 @@ api.get("/download/:sessionId", (c) => {
 
   try {
     const zipBuffer = createZipBuffer(sessionId, projectName);
-    const filename = `${projectName.replace(/\s+/g, "-")}-${sessionId.slice(-5)}.zip`;
+    // ⚠️ Content-Disposition filename은 ASCII-only 필수 (한글/한자 불가)
+    // RFC 6266: filename* 파라미터로 UTF-8 인코딩 처리
+    const safeAscii = projectName.replace(/[^a-zA-Z0-9-_]/g, "_").replace(/_+/g, "_").slice(0, 40);
+    const filename = `${safeAscii}-${sessionId.slice(-5)}.zip`;
+    // filename* 방식으로 UTF-8 원본명도 함께 제공 (모던 브라우저 지원)
+    const encodedName = encodeURIComponent(`${projectName}-${sessionId.slice(-5)}.zip`);
 
     return new Response(zipBuffer, {
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${encodedName}`,
         "Content-Length": String(zipBuffer.length)
       }
     });
   } catch (err) {
+    console.error("[ZIP 다운로드] 오류:", err);
     return c.json({
       error: "ZIP 생성 실패",
       detail: err instanceof Error ? err.message : "알 수 없는 오류"
@@ -221,24 +227,41 @@ api.post("/dev-harness", async (c) => {
 
               // 의존 파일 컨텍스트 구성 (이전 태스크에서 생성된 파일)
               const depContext = task.dependsOn.length > 0
-                ? `\n\n[의존 파일 목록: ${task.dependsOn.join(", ")}]\n이 파일들이 이미 세션에 존재합니다. require('./파일명') 방식으로 불러오세요.`
+                ? `\n\n[의존 파일 목록]\n이미 세션에 생성된 파일들: ${task.dependsOn.join(", ")}\n이 파일들을 const { xxx } = require('./${task.dependsOn[0]}') 방식으로 불러오세요.`
                 : "";
 
-              const prevContext = completedContext.slice(-3).join("\n\n---\n\n"); // 최근 3개만
+              // 이전 태스크들의 export 정보를 컨텍스트에 포함
+              const prevContext = completedContext.slice(-3).join("\n\n---\n\n");
+
+              // export 함수 목록 힌트
+              const exportHint = task.exportedFunctions && task.exportedFunctions.length > 0
+                ? `\n\n[이 파일이 export해야 할 함수]\nmodule.exports = { ${task.exportedFunctions.join(", ")} }`
+                : task.filename !== plan.entryFile
+                  ? `\n\n[주의] 이 파일은 module.exports = { 구현한함수들 }로 반드시 export하세요.`
+                  : "";
 
               // Developer 실행
               send("dev_decision", {
                 stepCount: task.id,
                 nextRole: "developer",
-                instruction: `"${task.filename}" 파일을 구현하세요.`,
+                instruction: `"${task.filename}" 파일을 구현하세요. (절대 다른 파일명 사용 금지)`,
                 reasoning: task.title,
                 priority: "normal",
                 timestamp: new Date().toISOString()
               });
 
+              const devInstruction = `[태스크 ${task.id}/${plan.totalTasks}] ${task.title}
+
+⚠️ 중요: 반드시 파일명 "${task.filename}"으로만 저장하세요. 다른 파일명 사용 금지!
+
+${task.description}${depContext}${exportHint}
+
+파일명: ${task.filename}
+세션 ID: ${sessionId}`;
+
               const devLog = await runDevAgent(
                 "developer",
-                `[태스크 ${task.id}/${plan.totalTasks}] ${task.title}\n\n${task.description}${depContext}\n\n파일명: ${task.filename}\n세션 ID: ${sessionId}`,
+                devInstruction,
                 apiKey,
                 sessionId,
                 prevContext
